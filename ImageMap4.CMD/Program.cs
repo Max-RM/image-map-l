@@ -9,6 +9,10 @@ using System.Text;
 using TryashtarUtils.Utility;
 
 Console.OutputEncoding = Encoding.UTF8;
+// Log option (-l / --log)
+bool logEnabled = args.Contains("-l") || args.Contains("--log");
+long? firstCreatedId = null;
+long? lastCreatedId = null;
 if (args.Length == 0)
 {
     Console.WriteLine(
@@ -28,6 +32,7 @@ Actions:
      --id <id>
   --delete <ids...>
   --change-id <<from>,<to>...>
+  -l or --log (track first and last IDs created in this batch for logging)
 ");
     return;
 }
@@ -286,9 +291,18 @@ for (int i = 1; i < args.Length; i++)
                 Console.WriteLine($"Generating {settings.Width * settings.Height} maps from image");
                 var batch = world.MakeMaps(settings);
                 var data = ListUtils.Map2D(batch, x => new Map(starting_id++.Value, x));
+                // Track first and last IDs created in this batch for logging
+                var flatData = ListUtils.Flatten(data);
+                long batchMin = flatData.Min(m => m.ID);
+                long batchMax = flatData.Max(m => m.ID);
+                if (firstCreatedId == null || batchMin < firstCreatedId)
+                    firstCreatedId = batchMin;
+                if (lastCreatedId == null || batchMax > lastCreatedId)
+                    lastCreatedId = batchMax;
+
                 var structure = new StructureGrid("imagemap:" + Path.GetFileNameWithoutExtension(file), data);
                 Console.WriteLine("Adding maps to world");
-                world.AddMaps(ListUtils.Flatten(data));
+                world.AddMaps(flatData);
                 if (inventory != null)
                 {
                     Console.WriteLine($"Adding structure {structure.Identifier} to inventory");
@@ -296,8 +310,33 @@ for (int i = 1; i < args.Length; i++)
                 }
             }
             break;
+        case "-l":
+        case "--log":
+            // Already handled globally, nothing else to do here
+            break;
         default:
             Console.Error.WriteLine($"Unexpected action '{args[i]}', expected --inventory, --import, --delete, or --change-id");
             break;
     }
+}
+
+// After processing all actions, write log file if requested
+if (logEnabled)
+{
+    if (firstCreatedId != null && lastCreatedId != null)
+    {
+        try
+        {
+            string exeDir = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName)!;
+            string logPath = Path.Combine(exeDir, "ImageMapCMD_logged_IDs.txt");
+            File.WriteAllText(logPath, $"{firstCreatedId}\n{lastCreatedId}\ndone\n");
+            Console.WriteLine($"Logged created map IDs to {logPath}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to write log file: {ex.Message}");
+        }
+    }
+    else
+        Console.WriteLine("Log option was specified, but no maps were created during this run.");
 }
