@@ -2,12 +2,6 @@
 using LevelDBWrapper;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace ImageMap4;
 
@@ -15,10 +9,15 @@ public class BedrockWorld : World
 {
     private LevelDB? DBAccess;
     private readonly object DBLock = new();
-    public IBedrockVersion Version { get; }
+    public IBedrockVersion? Version { get; }
     public override string Name { get; }
     public override string WorldIcon { get; }
     public override DateTime AccessDate { get; }
+
+    public override bool SupportsInvisibleFrames => false;
+    public override bool SupportsGlowFrames => Version?.SupportsGlowFrames ?? false;
+    public override bool SupportsChests => Version?.SupportsChests ?? false;
+    public override bool SupportsStructures => Version?.SupportsStructures ?? false;
 
     public BedrockWorld(string folder) : base(folder)
     {
@@ -32,9 +31,8 @@ public class BedrockWorld : World
         leveldat.Position = 8;
         var nbt = new NbtFile() { BigEndian = false };
         nbt.LoadFromStream(leveldat, NbtCompression.None);
-        Version = VersionManager.DetermineBedrockVersion(nbt.GetRootTag<NbtCompound>());
-        if (Version == null)
-            throw new InvalidDataException("Could not determine version of world");
+        var version = VersionManager.DetermineBedrockVersion(nbt.GetRootTag<NbtCompound>());
+        Version = version;
         AccessDate = File.GetLastWriteTime(leveldat.Name);
     }
 
@@ -100,27 +98,39 @@ public class BedrockWorld : World
             var key = "structuretemplate_" + structure.Identifier;
             var file = new NbtFile(nbt) { BigEndian = false };
             batch.Put(key, file.SaveToBuffer(NbtCompression.None));
-            var item = new NbtCompound {
-                new NbtString("Name", "minecraft:structure_block"),
-                new NbtByte("Count", 1),
-                new NbtCompound("tag") {
-                    new NbtInt("data", 2),
-                    new NbtString("structureName", structure.Identifier),
-                    new NbtFloat("integrity", 100),
-                    new NbtInt("xStructureOffset", 0),
-                    new NbtInt("yStructureOffset", 0),
-                    new NbtInt("zStructureOffset", 0),
-                    new NbtInt("xStructureSize", 1),
-                    new NbtInt("yStructureSize", structure.GridHeight),
-                    new NbtInt("zStructureSize", structure.GridWidth),
-                    new NbtCompound("display") {
-                        new NbtString("Name", $"§r§d{structure.Identifier}§r")
-                    }
-                }
-            };
+            var item = Version.CreateStructureItem(structure);
             items.Add(item);
         }
         db.Write(batch);
+        inventory.AddItems(items);
+    }
+
+    public override void AddChest(IEnumerable<long> ids, IInventory inventory)
+    {
+        if (Version == null)
+        {
+            return;
+        }
+        var items = new List<NbtCompound>();
+        var idlist = ids.ToList();
+        if (idlist.Count == 1 || !SupportsChests)
+        {
+            items.AddRange(idlist.Select(x => Version.CreateMapItem(x)));
+        }
+        else
+        {
+            var chunks = idlist.Chunk(27);
+            foreach (var chunk in chunks)
+            {
+                var maps = idlist.Select(x => Version.CreateMapItem(x)).ToArray();
+                for (int i = 0; i < maps.Length; i++)
+                {
+                    maps[i].Add(new NbtByte("Slot", (byte)i));
+                }
+                var chest = Version.CreateChestItem($"maps {chunk[0]} - {chunk[chunk.Length - 1]}", maps);
+                items.Add(chest);
+            }
+        }
         inventory.AddItems(items);
     }
 

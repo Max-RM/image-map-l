@@ -19,9 +19,9 @@
 		<Copyright>Copyright © 2022 tryashtar</Copyright>
 		<PackageProjectUrl>https://github.com/tryashtar/image-map</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/tryashtar/image-map</RepositoryUrl>
-		<AssemblyVersion>4.2.6.0</AssemblyVersion>
-		<FileVersion>4.2.6.0</FileVersion>
-		<Version>4.2.6</Version>
+		<AssemblyVersion>4.3.1.0</AssemblyVersion>
+		<FileVersion>4.3.1.0</FileVersion>
+		<Version>4.3.1</Version>
 		<SignAssembly>false</SignAssembly>
 		<PlatformTarget>x64</PlatformTarget>
 	</PropertyGroup>
@@ -58,7 +58,7 @@
 		<PackageReference Include="Extended.Wpf.Toolkit" Version="4.6.0" />
 		<PackageReference Include="gong-wpf-dragdrop" Version="3.2.1" />
 		<PackageReference Include="Ookii.Dialogs.Wpf" Version="5.0.1" />
-		<PackageReference Include="SixLabors.ImageSharp" Version="3.1.4" />
+		<PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
 		<PackageReference Include="VirtualizingWrapPanel" Version="2.0.6" />
 		<PackageReference Include="YamlDotNet" Version="15.3.0" />
 	</ItemGroup>
@@ -72,6 +72,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Compile Update="AddToInventoryWindow.xaml.cs">
+		  <SubType>Code</SubType>
+		</Compile>
 		<Compile Update="Properties\Resources.Designer.cs">
 			<DesignTime>True</DesignTime>
 			<AutoGen>True</AutoGen>
@@ -117,7 +120,7 @@
 	</ItemGroup>
 
 	<Target Name="PostPublish" AfterTargets="Publish">
-		<Exec Command="dotnet publish -o &quot;$(ProjectDir)bin\Publish&quot; &quot;$(SolutionDir)ImageMap4.CMD" />
+		<Exec Command="dotnet publish -o &quot;$(ProjectDir)bin\Publish&quot; &quot;$(SolutionDir)ImageMap4.CMD&quot;" />
 		<Exec Command="powershell Compress-Archive -Path '$(ProjectDir)bin\Publish\*.dll', '$(ProjectDir)bin\Publish\*.exe' -DestinationPath '$(ProjectDir)bin\Publish\ImageMap4.zip' -Force" />
 	</Target>
 </Project>

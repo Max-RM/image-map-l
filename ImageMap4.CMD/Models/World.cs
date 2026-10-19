@@ -3,12 +3,6 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Processing.Processors.Dithering;
 using SixLabors.ImageSharp.Processing.Processors.Transforms;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.IO;
-using System.Text;
 
 namespace ImageMap4;
 
@@ -24,11 +18,17 @@ public abstract class World
         Folder = folder;
     }
 
+    public abstract bool SupportsInvisibleFrames { get; }
+    public abstract bool SupportsGlowFrames { get; }
+    public abstract bool SupportsChests { get; }
+    public abstract bool SupportsStructures { get; }
+
     public abstract bool IsIdTaken(long id);
     public abstract IAsyncEnumerable<Map> GetMapsAsync();
     public abstract void AddMaps(IEnumerable<Map> maps);
     public abstract void RemoveMaps(IEnumerable<long> ids);
     public abstract void AddStructures(IEnumerable<StructureGrid> structures, IInventory inventory);
+    public abstract void AddChest(IEnumerable<long> ids, IInventory inventory);
     public abstract IEnumerable<IInventory> GetInventories();
     protected abstract void ProcessImage(Image<Rgba32> image, ProcessSettings settings);
     protected abstract byte[] EncodeColors(Image<Rgba32> image);

@@ -3,35 +3,37 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Processing.Processors.Quantization;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Threading.Tasks;
 using TryashtarUtils.Nbt;
 
 namespace ImageMap4;
 
 public class JavaWorld : World
 {
-    public IJavaVersion Version { get; }
+    public IJavaVersion? Version { get; }
     public override string Name { get; }
     public override string WorldIcon { get; }
     public override DateTime AccessDate { get; }
+    private readonly NbtFile LevelDat;
+
+    public override bool SupportsInvisibleFrames => Version?.SupportsInvisibleFrames ?? false;
+    public override bool SupportsGlowFrames => Version?.SupportsGlowFrames ?? false;
+    public override bool SupportsChests => Version?.SupportsChests ?? false;
+    public override bool SupportsStructures => Version?.SupportsStructures ?? false;
 
     public JavaWorld(string folder) : base(folder)
     {
-        var leveldat = new NbtFile(Path.Combine(Folder, "level.dat"));
-        Version = VersionManager.DetermineJavaVersion(leveldat.GetRootTag<NbtCompound>().Get<NbtCompound>("Data"));
-        if (Version == null)
-            throw new InvalidDataException("Could not determine version of world");
-        Name = leveldat.RootTag["Data"]?["LevelName"]?.StringValue ?? "";
+        LevelDat = new NbtFile(Path.Combine(Folder, "level.dat"));
+        var version = VersionManager.DetermineJavaVersion(LevelDat.GetRootTag<NbtCompound>().Get<NbtCompound>("Data"));
+        Version = version;
+        Name = LevelDat.RootTag["Data"]?["LevelName"]?.StringValue ?? "";
         WorldIcon = Path.Combine(Folder, "icon.png");
-        AccessDate = File.GetLastWriteTime(leveldat.FileName);
+        AccessDate = File.GetLastWriteTime(LevelDat.FileName);
     }
 
     public override bool IsIdTaken(long id)
     {
-        return File.Exists(Path.Combine(Folder, "data", $"map_{id}.dat"));
+        string path = Version.MapFileLocation(this.Folder, id);
+        return File.Exists(path);
     }
 
     public override void AddStructures(IEnumerable<StructureGrid> structures, IInventory inventory)
@@ -50,45 +52,147 @@ public class JavaWorld : World
         inventory.AddItems(items);
     }
 
+    public override void AddChest(IEnumerable<long> ids, IInventory inventory)
+    {
+        if (Version == null)
+        {
+            return;
+        }
+        var items = new List<NbtCompound>();
+        var idlist = ids.ToList();
+        if (idlist.Count == 1 || !SupportsChests)
+        {
+            items.AddRange(idlist.Select(x => Version.MakeMapItem(x)));
+        }
+        else
+        {
+            var chunks = idlist.Chunk(27);
+            foreach (var chunk in chunks)
+            {
+                var maps = idlist.Select(x => Version.MakeMapItem(x)).ToArray();
+                for (int i = 0; i < maps.Length; i++)
+                {
+                    if (Version.DataVersion != null && Version.DataVersion.Value >= 3821)
+                    {
+                        maps[i].Name = "item";
+                        maps[i] = new NbtCompound()
+                        {
+                            maps[i],
+                            new NbtInt("slot", i)
+                        };
+                    }
+                    else
+                    {
+                        maps[i].Add(new NbtByte("Slot", (byte)i));
+                    }
+                }
+                var chest = Version.MakeChestItem($"maps {chunk[0]} - {chunk[chunk.Length - 1]}", maps);
+                items.Add(chest);
+            }
+        }
+        inventory.AddItems(items);
+    }
+
+    private static string ToStringUUID(int[] bits)
+    {
+        byte[] bytes = bits.SelectMany(x => BitConverter.GetBytes(x)).ToArray();
+        (bytes[4], bytes[6]) = (bytes[6], bytes[4]);
+        (bytes[5], bytes[7]) = (bytes[7], bytes[5]);
+        (bytes[8], bytes[11]) = (bytes[11], bytes[8]);
+        (bytes[9], bytes[10]) = (bytes[10], bytes[9]);
+        (bytes[12], bytes[15]) = (bytes[15], bytes[12]);
+        (bytes[13], bytes[14]) = (bytes[14], bytes[13]);
+        var guid = new Guid(bytes);
+        return guid.ToString();
+    }
+
     public override IEnumerable<IInventory> GetInventories()
     {
-        yield return new JavaInventory("Local player", Path.Combine(Folder, "level.dat"), NbtPath.Parse("Data.Player.Inventory"));
-        var playerdata = Path.Combine(Folder, "playerdata");
-        if (Directory.Exists(playerdata))
+        var singleplayer_uuid = LevelDat.GetRootTag<NbtCompound>()?.Get<NbtCompound>("Data")?.Get<NbtIntArray>("singleplayer_uuid");
+        if (singleplayer_uuid != null)
         {
-            foreach (var file in Directory.GetFiles(playerdata, "*.dat"))
+            var uuid = ToStringUUID(singleplayer_uuid.Value);
+            var matching_path = Version.PlayerDataLocation(Folder, uuid);
+            if (File.Exists(matching_path) || Directory.Exists(matching_path))
             {
-                string uuid = Path.GetFileNameWithoutExtension(file);
-                if (uuid.Length == 36)
-                    yield return new JavaInventory(uuid, file, NbtPath.Parse("Inventory"));
+                var player_file = new NbtFile(matching_path);
+                var player_inv = player_file.GetRootTag<NbtCompound>()?.Get<NbtList>("Inventory");
+                if (player_inv != null)
+                {
+                    yield return new JavaInventory("Local player", player_file, player_inv);
+                }
+            }
+        }
+        else
+        {
+            var singleplayer_inv = LevelDat.GetRootTag<NbtCompound>()?.Get<NbtCompound>("Data")?.Get<NbtCompound>("Player")?.Get<NbtList>("Inventory");
+            if (singleplayer_inv != null)
+            {
+                yield return new JavaInventory("Local player", LevelDat, singleplayer_inv);
+            }
+        }
+        if (Version.SupportsPlayerData)
+        {
+            var playerdata_folder = Path.GetDirectoryName(Version.PlayerDataLocation(Folder, "A"));
+            if (Directory.Exists(playerdata_folder))
+            {
+                foreach (var file in Directory.GetFiles(playerdata_folder, "*.dat"))
+                {
+                    string uuid = Path.GetFileNameWithoutExtension(file);
+                    if (uuid.Length == 36)
+                    {
+                        var player_file = new NbtFile(file);
+                        var player_inv = player_file.GetRootTag<NbtCompound>()?.Get<NbtList>("Inventory");
+                        if (player_inv != null)
+                        {
+                            yield return new JavaInventory(uuid, player_file, player_inv);
+                        }
+                    }
+                }
             }
         }
     }
 
     public override async IAsyncEnumerable<Map> GetMapsAsync()
     {
-        var maps = Path.Combine(Folder, "data");
-        if (Directory.Exists(maps))
+        var maps_folder = Path.GetDirectoryName(Version.MapFileLocation(Folder, 0));
+        if (Directory.Exists(maps_folder))
         {
-            foreach (var file in Directory.EnumerateFiles(maps, "*.dat"))
+            foreach (var file in Directory.EnumerateFiles(maps_folder, "*.dat"))
             {
-                string name = Path.GetFileNameWithoutExtension(file);
-                if (name.StartsWith("map_"))
+                if (GetMapFileId(file, out _))
+                {
                     yield return await Task.Run(() => GetMap(file));
+                }
             }
         }
     }
 
+    private static bool GetMapFileId(string filepath, out long? id)
+    {
+        string name = Path.GetFileNameWithoutExtension(filepath);
+        if (name.StartsWith("map_"))
+        {
+            name = name[4..];
+        }
+        if (long.TryParse(name, out long gotid))
+        {
+            id = gotid;
+            return true;
+        }
+        id = null;
+        return false;
+    }
+
     private Map GetMap(string file)
     {
-        string name = Path.GetFileNameWithoutExtension(file);
-        long id = long.Parse(name[4..]);
+        GetMapFileId(file, out long? id);
         var nbt = new NbtFile() { BigEndian = true };
         nbt.LoadFromFile(file, NbtCompression.GZip, null);
         var full_data = nbt.GetRootTag<NbtCompound>();
         var colors = full_data.Get<NbtCompound>("data").Get<NbtByteArray>("colors").Value;
         var image = Version.Decode(colors);
-        return new Map(id, new MapData(image, colors, full_data));
+        return new Map(id.Value, new MapData(image, colors, full_data));
     }
 
     public override void AddMaps(IEnumerable<Map> maps)
@@ -105,9 +209,40 @@ public class JavaWorld : World
             }
             data.Name = "";
             nbt.RootTag = data;
-            var folder = Path.Combine(Folder, "data");
+            string file = Version.MapFileLocation(this.Folder, map.ID);
+            string folder = Path.GetDirectoryName(file);
             Directory.CreateDirectory(folder);
-            nbt.SaveToFile(Path.Combine(folder, $"map_{map.ID}.dat"), NbtCompression.GZip);
+            nbt.SaveToFile(file, NbtCompression.GZip);
+        }
+        var maps_folder = Path.GetDirectoryName(Version.MapFileLocation(Folder, 0));
+        if (Directory.Exists(maps_folder))
+        {
+            long biggest_id = 0;
+            foreach (var file in Directory.EnumerateFiles(maps_folder, "*.dat"))
+            {
+                if (GetMapFileId(file, out long? id))
+                {
+                    if (id != null)
+                    {
+                        biggest_id = Math.Max(biggest_id, id.Value);
+                    }
+                }
+            }
+            var idcount = Version.MapLastIdLocation(Folder);
+            Directory.CreateDirectory(Path.GetDirectoryName(idcount));
+            var compound = new NbtCompound("")
+            {
+                new NbtCompound("data")
+                {
+                    new NbtInt("map", (int)biggest_id)
+                }
+            };
+            if (Version.DataVersion.HasValue)
+            {
+                compound.Add(new NbtInt("DataVersion", Version.DataVersion.Value));
+            }
+            var nbtfile = new NbtFile(compound);
+            nbtfile.SaveToFile(idcount, NbtCompression.GZip);
         }
     }
 
@@ -115,7 +250,7 @@ public class JavaWorld : World
     {
         foreach (var id in ids)
         {
-            var file = Path.Combine(Folder, "data", $"map_{id}.dat");
+            var file = Version.MapFileLocation(this.Folder, id);
             if (File.Exists(file))
                 File.Delete(file);
         }

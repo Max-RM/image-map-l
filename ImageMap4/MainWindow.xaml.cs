@@ -1,18 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
 using Ookii.Dialogs.Wpf;
 using System.Windows.Controls;
 using System.Windows.Data;
-using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
 using System.ComponentModel;
 using GongSolutions.Wpf.DragDrop;
 using System.IO;
@@ -38,6 +34,7 @@ public partial class MainWindow : Window, IDropTarget
     public ICommand OpenMapFileCommand { get; }
     public ICommand ChangeIDCommand { get; }
     public ICommand ExportImageCommand { get; }
+    public ICommand AddToInventoryCommand { get; }
     public MainWindow()
     {
         PasteCommand = new RelayCommand(() =>
@@ -67,7 +64,11 @@ public partial class MainWindow : Window, IDropTarget
         });
         OpenMapFileCommand = new RelayCommand<Map>(x =>
         {
-            Process.Start("explorer.exe", $"/select, \"{Path.Combine(ViewModel.SelectedWorld.Folder, "data", $"map_{x.ID}.dat")}\"");
+            if (ViewModel.SelectedWorld is JavaWorld world)
+            {
+                string path = world.Version.MapFileLocation(world.Folder, x.ID);
+                Process.Start("explorer.exe", $"/select, \"{path.Replace('/', '\\')}\"");
+            }
         });
         ChangeIDCommand = new RelayCommand<IList<Selectable<Map>>>(x =>
         {
@@ -80,6 +81,20 @@ public partial class MainWindow : Window, IDropTarget
                     ViewModel.ChangeIDs(x, selected, window.ID);
                 else if (window.Result == ChangeResult.Auto)
                     ViewModel.AutoIDs(x, selected);
+            }
+        });
+        AddToInventoryCommand = new RelayCommand<IList<Selectable<Map>>>(x =>
+        {
+            var selected = x.Where(x => x.IsSelected);
+            var window = new AddToInventoryWindow(this.ViewModel);
+            window.Owner = this;
+            if (window.ShowDialog() ?? false)
+            {
+                var inventory = window.SelectedInventory;
+                if (inventory != null && ViewModel.SelectedWorld != null)
+                {
+                    ViewModel.SelectedWorld.AddChest(selected.Select(x => x.Item.ID), inventory);
+                }
             }
         });
         ExportImageCommand = new RelayCommand<ObservableList<Selectable<Map>>>(x =>
@@ -204,7 +219,6 @@ public partial class MainWindow : Window, IDropTarget
         {
             StructureWindow = new(new StructureViewModel(new GridMakerViewModel(this.ViewModel, this.ViewModel.ExistingMaps)));
             StructureWindow.Owner = this;
-            StructureWindow.ViewModel.JavaMode = ViewModel.SelectedWorld is JavaWorld;
             StructureWindow.ViewModel.OnConfirmed += (s, e) => Try(() => ViewModel.SelectedWorld.AddStructures(new[] { e.grid }, e.inventory));
         }
         StructureWindow.Show();
@@ -278,16 +292,29 @@ public partial class MainWindow : Window, IDropTarget
         return false;
     }
 
-    private void TryOpenWorld(World world)
+    private bool TryOpenWorld(World world)
     {
+        if (world is JavaWorld java && java.Version == null)
+        {
+            ViewModel.SelectedWorld = null;
+            return false;
+        }
+        if (world is BedrockWorld bedrock && bedrock.Version == null)
+        {
+            ViewModel.SelectedWorld = null;
+            return false;
+        }
         try
         {
             ViewModel.SelectedWorld = world;
+            return true;
         }
         catch (Exception ex)
         {
             MessageBox.Show(ex.ToString());
         }
+        ViewModel.SelectedWorld = null;
+        return false;
     }
 
     private void JavaWorldList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -295,7 +322,11 @@ public partial class MainWindow : Window, IDropTarget
         if (JavaWorldList.SelectedIndex != -1)
         {
             BedrockWorldList.SelectedIndex = -1;
-            TryOpenWorld((World)JavaWorldList.SelectedItem);
+            var success = TryOpenWorld((World)JavaWorldList.SelectedItem);
+            if (!success)
+            {
+                JavaWorldList.SelectedIndex = -1;
+            }
         }
     }
 
@@ -304,13 +335,20 @@ public partial class MainWindow : Window, IDropTarget
         if (BedrockWorldList.SelectedIndex != -1)
         {
             JavaWorldList.SelectedIndex = -1;
-            TryOpenWorld((World)BedrockWorldList.SelectedItem);
+            var success = TryOpenWorld((World)BedrockWorldList.SelectedItem);
+            if (!success)
+            {
+                JavaWorldList.SelectedIndex = -1;
+            }
         }
     }
 
     private void World_DoubleClick(object sender, MouseButtonEventArgs e)
     {
-        TabList.SelectedItem = MapsTab;
+        if (ViewModel.SelectedWorld != null)
+        {
+            TabList.SelectedItem = MapsTab;
+        }
     }
 }
 

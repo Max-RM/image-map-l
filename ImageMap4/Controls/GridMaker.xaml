@@ -10,6 +10,13 @@
              mc:Ignorable="d"
              d:DesignHeight="450"
              d:DesignWidth="800">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../Shared.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition />
@@ -32,7 +39,41 @@
                               dd:DragDrop.IsDragSource="True"
                               dd:DragDrop.UseDefaultDragAdorner="True"
                               dd:DragDrop.DropHandler="{Binding Path=., RelativeSource={RelativeSource AncestorType=local:GridMaker}}">
-                            <local:MapPreview DataContext="{Binding Data}" />
+                            <Grid>
+                                <Image RenderOptions.BitmapScalingMode="NearestNeighbor">
+                                    <Image.Style>
+                                        <Style TargetType="Image">
+                                            <Setter Property="Source"
+                                                    Value="{StaticResource ItemFrame}" />
+                                            <Setter Property="Visibility"
+                                                    Value="Visible" />
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding DataContext.GlowingFrames, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                   Value="True"/>
+                                                        <Condition Binding="{Binding DataContext.Parent.SelectedWorld.SupportsGlowFrames, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    Value="True"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Source"
+                                                            Value="{StaticResource GlowItemFrame}" />
+                                                </MultiDataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding DataContext.InvisibleFrames, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                   Value="True"/>
+                                                        <Condition Binding="{Binding DataContext.Parent.SelectedWorld.SupportsInvisibleFrames, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                   Value="True"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility"
+                                                            Value="Hidden" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Image.Style>
+                                </Image>
+                                <local:MapPreview DataContext="{Binding Data}" />
+                            </Grid>
                         </Grid>
                     </DataTemplate>
                 </local:SquareGrid.CellContentsTemplate>

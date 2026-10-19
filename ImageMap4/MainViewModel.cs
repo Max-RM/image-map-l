@@ -1,4 +1,3 @@
-using GongSolutions.Wpf.DragDrop;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -6,7 +5,6 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -15,6 +13,7 @@ using System.Windows.Input;
 using TryashtarUtils.Utility;
 
 namespace ImageMap4;
+
 public class MainViewModel : ObservableObject
 {
     public ICommand TransferAllCommand { get; }
@@ -33,24 +32,37 @@ public class MainViewModel : ObservableObject
         get { return CollectionViewSource.GetDefaultView(ExistingMaps); }
     }
     private readonly UndoHistory UndoHistory = new();
+    private FileStream? _sessionLock;
     private World? _selectedWorld;
     public World? SelectedWorld
     {
         get => _selectedWorld;
         set
         {
+            _sessionLock?.Unlock(0, 1);
+            _sessionLock?.Close();
+            _sessionLock?.Dispose();
+            _sessionLock = null;
             _selectedWorld = value;
             UndoHistory.Clear();
             OnPropertyChanged();
             MapCTS?.Cancel();
             MapCTS?.Dispose();
+            MapCTS = null;
             if (_selectedWorld != null)
             {
+                if (_selectedWorld is JavaWorld java)
+                {
+                    _sessionLock = new FileStream(Path.Combine(java.Folder, "session.lock"), FileMode.OpenOrCreate);
+                    _sessionLock.Lock(0, 1);
+                }
                 MapCTS = new();
                 _ = RefreshMaps(MapCTS.Token);
                 var inventories = _selectedWorld.GetInventories();
                 if (_selectedWorld is JavaWorld)
+                {
                     inventories = inventories.Select(x => new DisplayJavaInventory(x));
+                }
                 var players = inventories.ToList();
                 players.Insert(0, new NoInventory());
                 PlayerList = players.AsReadOnly();
@@ -58,7 +70,7 @@ public class MainViewModel : ObservableObject
             }
         }
     }
-    private CancellationTokenSource MapCTS = new();
+    private CancellationTokenSource? MapCTS;
 
     public HashSet<long> ConflictingIDs { get; } = new();
 
@@ -66,12 +78,6 @@ public class MainViewModel : ObservableObject
     {
         get { return Properties.Settings.Default.ShowEmptyMaps; }
         set { Properties.Settings.Default.ShowEmptyMaps = value; OnPropertyChanged(); ExistingMapsView.Refresh(); }
-    }
-
-    public bool CreateStructures
-    {
-        get { return Properties.Settings.Default.CreateStructures; }
-        set { Properties.Settings.Default.CreateStructures = value; OnPropertyChanged(); }
     }
 
     public MainViewModel()
@@ -87,18 +93,15 @@ public class MainViewModel : ObservableObject
                 return;
             var overwritten = ExistingMaps.Where(x => ConflictingIDs.Contains(x.Item.ID)).ToList();
             var importing = ImportingMaps.ToList();
-            int index = Properties.Settings.Default.InventoryChoice;
-            if (index < 0 || index >= PlayerList.Count)
-                index = 1;
-            var inventory = PlayerList[index];
-            if (CreateStructures)
-                SelectedWorld.AddStructures(ImportingStructures, inventory);
-            ImportingStructures.Clear();
             UndoHistory.Perform(() =>
             {
                 SelectedWorld.AddMaps(importing.Select(x => x.Item));
                 InsertRange(importing, ExistingMaps, Sorter);
                 RemoveRange(overwritten, ExistingMaps);
+                foreach (var map in ExistingMaps)
+                {
+                    map.IsSelected = importing.Contains(map);
+                }
                 ImportingMaps.Clear();
             }, () =>
             {
@@ -259,6 +262,11 @@ public class MainViewModel : ObservableObject
         JavaWorlds.Clear();
         BedrockWorlds.Clear();
         Properties.Settings.Default.JavaFolders ??= new();
+        if (Properties.Settings.Default.JavaFolders.Count == 0)
+        {
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".minecraft", "saves");
+            Properties.Settings.Default.JavaFolders.Add(path);
+        }
         foreach (var raw_dir in Properties.Settings.Default.JavaFolders)
         {
             string java_dir = Environment.ExpandEnvironmentVariables(raw_dir);
@@ -270,12 +278,15 @@ public class MainViewModel : ObservableObject
                     {
                         if (File.Exists(Path.Combine(dir, "level.dat")))
                         {
-                            JavaWorld world = null;
+                            JavaWorld? world = null;
                             try
                             {
                                 world = new JavaWorld(dir);
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("Error loading world: " + ex.ToString());
+                            }
                             if (world != null)
                                 yield return world;
                         }
@@ -288,6 +299,21 @@ public class MainViewModel : ObservableObject
             }
         }
         Properties.Settings.Default.BedrockFolders ??= new();
+        if (Properties.Settings.Default.BedrockFolders.Count == 0)
+        {
+            var users_folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Minecraft Bedrock", "Users");
+            if (Directory.Exists(users_folder))
+            {
+                foreach (var item in Directory.EnumerateDirectories(users_folder))
+                {
+                    if (!String.Equals(Path.GetFileName(item), "shared", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Properties.Settings.Default.BedrockFolders.Add(Path.Combine(item, "games", "com.mojang", "minecraftWorlds"));
+                        break;
+                    }
+                }
+            }
+        }
         foreach (var raw_dir in Properties.Settings.Default.BedrockFolders)
         {
             string bedrock_dir = Environment.ExpandEnvironmentVariables(raw_dir);
@@ -299,7 +325,7 @@ public class MainViewModel : ObservableObject
                     {
                         if (File.Exists(Path.Combine(dir, "level.dat")) && Directory.Exists(Path.Combine(dir, "db")))
                         {
-                            BedrockWorld world = null;
+                            BedrockWorld? world = null;
                             try
                             {
                                 world = new BedrockWorld(dir);

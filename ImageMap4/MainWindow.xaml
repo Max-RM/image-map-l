@@ -78,6 +78,9 @@
                 <MenuItem Header="Export image"
                           Command="{Binding ExportImageCommand, Source={x:Reference This}}"
                           CommandParameter="{Binding DataContext.ExistingMaps, Source={x:Reference This}}" />
+                <MenuItem Header="Add to inventory"
+                          Command="{Binding AddToInventoryCommand, Source={x:Reference This}}"
+                          CommandParameter="{Binding DataContext.ExistingMaps, Source={x:Reference This}}" />
             </ContextMenu>
             <Style x:Key="WorldCard"
                    TargetType="ListViewItem">
@@ -317,11 +320,6 @@
                                 </Style>
                             </TextBlock.Style>
                         </TextBlock>
-                        <CheckBox Content="Create structures"
-                                  IsChecked="{Binding CreateStructures}"
-                                  FontSize="16"
-                                  VerticalContentAlignment="Center"
-                                  HorizontalAlignment="Right" />
                     </DockPanel>
                     <StackPanel Orientation="Horizontal">
                         <Button Padding="10,5,15,5"
@@ -497,6 +495,11 @@
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding ExistingMapsView.Count}"
                                                      Value="0">
+                                            <Setter Property="Visibility"
+                                                    Value="Collapsed" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding SelectedWorld.SupportsStructures}"
+                                                         Value="False">
                                             <Setter Property="Visibility"
                                                     Value="Collapsed" />
                                         </DataTrigger>
