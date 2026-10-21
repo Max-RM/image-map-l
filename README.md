@@ -199,7 +199,7 @@ scripts\Publish-All.ps1 -SelfContained
 scripts\Package-All.ps1
 ```
 
-Framework-dependent builds are written to `Publish\ImageMap_<rid>`. Self-contained builds are written to `Publish\ImageMap_SelfContained_<rid>`. `Package-All.ps1` creates ZIP archives from the framework-dependent directories in `Archives`.
+Framework-dependent builds are written to `Publish\ImageMap_<rid>`. Self-contained builds are written to `Publish\ImageMap_SelfContained_<rid>`. `Package-All.ps1` creates `Archives\ImageMap-<rid>.zip` and `Archives\ImageMap-SelfContained-<rid>.zip` for each published target. Pass `-SkipSelfContained` to package only the framework-dependent builds.
 
 The GUI is published only for Windows targets. The `linux-x64` target publishes the CLI only.
 

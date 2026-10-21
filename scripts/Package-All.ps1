@@ -1,6 +1,7 @@
 param(
     [ValidateSet("win-x64", "win-x86", "win-arm64", "linux-x64", "source")]
     [string[]]$Items = @("win-x64", "win-x86", "win-arm64", "linux-x64"),
+    [switch]$SkipSelfContained,
     [switch]$NoPause
 )
 
@@ -93,8 +94,14 @@ try {
 
     foreach ($rid in @("win-x64", "win-x86", "win-arm64", "linux-x64")) {
         if ($Items -notcontains $rid) { continue }
+
         $srcDir = Join-Path $PublishRoot "ImageMap_$rid"
         New-Archive -SourceDir $srcDir -ArchiveName "ImageMap-$rid"
+
+        if (-not $SkipSelfContained) {
+            $selfContainedDir = Join-Path $PublishRoot "ImageMap_SelfContained_$rid"
+            New-Archive -SourceDir $selfContainedDir -ArchiveName "ImageMap-SelfContained-$rid"
+        }
     }
 
     Write-Ok ""
