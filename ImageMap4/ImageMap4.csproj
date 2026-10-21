@@ -23,7 +23,6 @@
 		<FileVersion>4.3.1.0</FileVersion>
 		<Version>4.3.1</Version>
 		<SignAssembly>false</SignAssembly>
-		<PlatformTarget>x64</PlatformTarget>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -119,7 +118,7 @@
 		</Page>
 	</ItemGroup>
 
-	<Target Name="PostPublish" AfterTargets="Publish">
+	<Target Name="PostPublish" AfterTargets="Publish" Condition="'$(SkipPostPublish)' != 'true'">
 		<Exec Command="dotnet publish -o &quot;$(ProjectDir)bin\Publish&quot; &quot;$(SolutionDir)ImageMap4.CMD&quot;" />
 		<Exec Command="powershell Compress-Archive -Path '$(ProjectDir)bin\Publish\*.dll', '$(ProjectDir)bin\Publish\*.exe' -DestinationPath '$(ProjectDir)bin\Publish\ImageMap4.zip' -Force" />
 	</Target>

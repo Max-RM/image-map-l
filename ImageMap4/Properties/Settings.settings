@@ -26,6 +26,12 @@
     <Setting Name="GlowingFrames" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
     </Setting>
+    <Setting Name="CreateMaps" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">True</Value>
+    </Setting>
+    <Setting Name="CreateStructures" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">True</Value>
+    </Setting>
     <Setting Name="InventoryChoice" Type="System.Int32" Scope="User">
       <Value Profile="(Default)">1</Value>
     </Setting>

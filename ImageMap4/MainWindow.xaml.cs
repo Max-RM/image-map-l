@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using Microsoft.Win32;
-using Ookii.Dialogs.Wpf;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -35,6 +34,7 @@ public partial class MainWindow : Window, IDropTarget
     public ICommand ChangeIDCommand { get; }
     public ICommand ExportImageCommand { get; }
     public ICommand AddToInventoryCommand { get; }
+    public ICommand PreviewCommand { get; }
     public MainWindow()
     {
         PasteCommand = new RelayCommand(() =>
@@ -83,6 +83,13 @@ public partial class MainWindow : Window, IDropTarget
                     ViewModel.AutoIDs(x, selected);
             }
         });
+        PreviewCommand = new RelayCommand<Selectable<Map>>(x =>
+        {
+            if (x == null)
+                return;
+            var window = new PreviewWindow(x.Item) { Owner = this };
+            window.ShowDialog();
+        });
         AddToInventoryCommand = new RelayCommand<IList<Selectable<Map>>>(x =>
         {
             var selected = x.Where(x => x.IsSelected);
@@ -91,9 +98,37 @@ public partial class MainWindow : Window, IDropTarget
             if (window.ShowDialog() ?? false)
             {
                 var inventory = window.SelectedInventory;
+                if (inventory is NoInventory)
+                {
+                    MessageBox.Show(this, "No inventory was selected.", "Image Map",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
                 if (inventory != null && ViewModel.SelectedWorld != null)
                 {
-                    ViewModel.SelectedWorld.AddChest(selected.Select(x => x.Item.ID), inventory);
+                    try
+                    {
+                        var world = ViewModel.SelectedWorld;
+                        var free = inventory.FreeSlots;
+                        var leaves = selected.Select(x => world.MakeMapLeaf(x.Item.ID)).ToList();
+                        var packed = leaves.Count > free
+                            ? world.PackInventoryItems(leaves, InventoryMode.Chests)
+                            : leaves;
+                        inventory.AddItems(packed);
+                        int added = Math.Min(packed.Count, free);
+                        int after = inventory.FreeSlots;
+                        ViewModel.TransferStatus = free <= 0
+                            ? $"No free slots in {inventory.Name}."
+                            : after >= free
+                                ? $"Could not write to {inventory.Name}; close the world in Minecraft and try again."
+                                : added < packed.Count
+                                    ? $"Added {added} of {packed.Count} map item(s) to {inventory.Name}; not enough free slots."
+                                    : $"Added {added} map item(s) to {inventory.Name}.";
+                    }
+                    catch (Exception ex)
+                    {
+                        ViewModel.TransferStatus = $"Could not write: {ex.Message}";
+                    }
                 }
             }
         });
@@ -128,6 +163,17 @@ public partial class MainWindow : Window, IDropTarget
                 ViewModel.DeleteCommand.Execute(ViewModel.ExistingMaps);
         });
         InitializeComponent();
+        ViewModel.ConfirmInsufficientSlots = ConfirmInsufficientSlots;
+    }
+
+    private InsufficientSlotsAction ConfirmInsufficientSlots(int needed, int free)
+    {
+        var result = MessageBox.Show(this,
+            $"Not enough free inventory slots.\n\nNeeded: {needed}\nFree: {free}\n\n" +
+            "Yes — ignore and continue: the map data will still be saved, but the inventory will not be changed.\n" +
+            "No — pause: nothing is changed and your imported maps stay in the list.",
+            "Image Map", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        return result == MessageBoxResult.Yes ? InsufficientSlotsAction.Ignore : InsufficientSlotsAction.Pause;
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -151,39 +197,44 @@ public partial class MainWindow : Window, IDropTarget
     private void JavaFolder_Click(object sender, RoutedEventArgs e)
     {
         Properties.Settings.Default.JavaFolders ??= new();
-        bool adding = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
-        var dialog = new VistaFolderBrowserDialog();
-        dialog.Description = adding ? "Add a Java world folder to the list" : "Select the folder where your Java worlds are saved";
-        dialog.UseDescriptionForTitle = true;
-        if (Properties.Settings.Default.JavaFolders.Count > 0)
-            dialog.SelectedPath = Environment.ExpandEnvironmentVariables(Properties.Settings.Default.JavaFolders[0]);
-        if (dialog.ShowDialog() == true)
-        {
-            if (!adding)
-                Properties.Settings.Default.JavaFolders.Clear();
-            Properties.Settings.Default.JavaFolders.Add(dialog.SelectedPath);
-            Properties.Settings.Default.Save();
-            ((MainViewModel)this.DataContext).RefreshWorlds();
-        }
+        PickWorldFolders(Properties.Settings.Default.JavaFolders, WorldSavePathRegistry.GetJavaPaths,
+            "Java worlds", "Check the folder(s) where your Java worlds are saved.");
     }
 
     private void BedrockFolder_Click(object sender, RoutedEventArgs e)
     {
         Properties.Settings.Default.BedrockFolders ??= new();
+        PickWorldFolders(Properties.Settings.Default.BedrockFolders, WorldSavePathRegistry.GetBedrockPaths,
+            "Bedrock worlds", "Check the folder(s) where your Bedrock worlds are saved. All folders found on this computer are listed.");
+    }
+
+    private void PickWorldFolders(
+        System.Collections.Specialized.StringCollection? folders,
+        Func<IEnumerable<string>, List<WorldSavePath>> discover,
+        string title,
+        string description)
+    {
+        folders ??= new();
         bool adding = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
-        var dialog = new VistaFolderBrowserDialog();
-        dialog.Description = adding ? "Add a Bedrock world folder to the list" : "Select the folder where your Bedrock worlds are saved";
-        dialog.UseDescriptionForTitle = true;
-        if (Properties.Settings.Default.BedrockFolders.Count > 0)
-            dialog.SelectedPath = Environment.ExpandEnvironmentVariables(Properties.Settings.Default.BedrockFolders[0]);
-        if (dialog.ShowDialog() == true)
+        var configured = folders.Cast<string>().ToList();
+        var candidates = discover(configured);
+        foreach (var candidate in candidates)
         {
-            if (!adding)
-                Properties.Settings.Default.BedrockFolders.Clear();
-            Properties.Settings.Default.BedrockFolders.Add(dialog.SelectedPath);
-            Properties.Settings.Default.Save();
-            ((MainViewModel)this.DataContext).RefreshWorlds();
+            candidate.IsChecked = adding || configured.Any(x =>
+                string.Equals(Environment.ExpandEnvironmentVariables(x).TrimEnd('\\', '/'), candidate.Path, StringComparison.OrdinalIgnoreCase));
         }
+        var window = new WorldFoldersWindow(title, description, candidates, !adding) { Owner = this };
+        if (window.ShowDialog() != true)
+            return;
+        if (window.ReplaceExisting)
+            folders.Clear();
+        foreach (var path in window.SelectedPaths)
+        {
+            if (!folders.Cast<string>().Any(x => string.Equals(Environment.ExpandEnvironmentVariables(x).TrimEnd('\\', '/'), path, StringComparison.OrdinalIgnoreCase)))
+                folders.Add(path);
+        }
+        Properties.Settings.Default.Save();
+        ((MainViewModel)this.DataContext).RefreshWorlds();
     }
 
     private void OpenButton_Click(object sender, RoutedEventArgs e)
@@ -350,6 +401,14 @@ public partial class MainWindow : Window, IDropTarget
             TabList.SelectedItem = MapsTab;
         }
     }
+
+    private void CloseMapsTab_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.SelectedWorld = null;
+        JavaWorldList.SelectedIndex = -1;
+        BedrockWorldList.SelectedIndex = -1;
+        TabList.SelectedItem = WorldsTab;
+    }
 }
 
 public class ConflictChecker : IMultiValueConverter
@@ -388,6 +447,7 @@ public class DisplayJavaInventory : IInventory, INotifyPropertyChanged
     private static readonly HttpClient Client = new();
     public event PropertyChangedEventHandler? PropertyChanged;
     public string Name { get; private set; }
+    public int FreeSlots => Wrapped.FreeSlots;
     public DisplayJavaInventory(IInventory wrapped)
     {
         Wrapped = wrapped;

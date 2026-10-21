@@ -362,3 +362,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Local output produced by scripts\Publish-All.ps1 / Package-All.ps1
+/Publish/
+/Archives/

@@ -38,6 +38,11 @@ public class JavaWorld : World
 
     public override void AddStructures(IEnumerable<StructureGrid> structures, IInventory inventory)
     {
+        inventory.AddItems(WriteStructureItems(structures));
+    }
+
+    public override List<NbtCompound> WriteStructureItems(IEnumerable<StructureGrid> structures)
+    {
         var items = new List<NbtCompound>();
         foreach (var structure in structures)
         {
@@ -49,7 +54,7 @@ public class JavaWorld : World
             var item = Version.MakeStructureItem(structure);
             items.Add(item);
         }
-        inventory.AddItems(items);
+        return items;
     }
 
     public override void AddChest(IEnumerable<long> ids, IInventory inventory)
@@ -58,39 +63,47 @@ public class JavaWorld : World
         {
             return;
         }
-        var items = new List<NbtCompound>();
-        var idlist = ids.ToList();
-        if (idlist.Count == 1 || !SupportsChests)
+        AddMapsToInventory(ids, inventory, InventoryMode.Chests);
+    }
+
+    public override NbtCompound MakeMapLeaf(long id) => Version!.MakeMapItem(id);
+
+    public override List<NbtCompound> PackInventoryItems(List<NbtCompound> leaves, InventoryMode mode)
+    {
+        if (Version == null || mode == InventoryMode.Items || !SupportsChests || leaves.Count <= 1)
+            return leaves;
+        var result = new List<NbtCompound>();
+        foreach (var chunk in leaves.Chunk(27))
         {
-            items.AddRange(idlist.Select(x => Version.MakeMapItem(x)));
-        }
-        else
-        {
-            var chunks = idlist.Chunk(27);
-            foreach (var chunk in chunks)
+            var maps = chunk.ToArray();
+            for (int i = 0; i < maps.Length; i++)
             {
-                var maps = idlist.Select(x => Version.MakeMapItem(x)).ToArray();
-                for (int i = 0; i < maps.Length; i++)
+                if (Version.DataVersion != null && Version.DataVersion.Value >= 3821)
                 {
-                    if (Version.DataVersion != null && Version.DataVersion.Value >= 3821)
+                    maps[i].Name = "item";
+                    maps[i] = new NbtCompound()
                     {
-                        maps[i].Name = "item";
-                        maps[i] = new NbtCompound()
-                        {
-                            maps[i],
-                            new NbtInt("slot", i)
-                        };
-                    }
-                    else
-                    {
-                        maps[i].Add(new NbtByte("Slot", (byte)i));
-                    }
+                        maps[i],
+                        new NbtInt("slot", i)
+                    };
                 }
-                var chest = Version.MakeChestItem($"maps {chunk[0]} - {chunk[chunk.Length - 1]}", maps);
-                items.Add(chest);
+                else
+                {
+                    maps[i].Add(new NbtByte("Slot", (byte)i));
+                }
             }
+            result.Add(Version.MakeChestItem("maps", maps));
         }
-        inventory.AddItems(items);
+        return result;
+    }
+
+    public override int SlotsNeeded(int itemCount, InventoryMode mode)
+    {
+        if (itemCount <= 0)
+            return 0;
+        if (mode == InventoryMode.Items || Version == null || !SupportsChests || itemCount == 1)
+            return itemCount;
+        return (itemCount + 26) / 27;
     }
 
     private static string ToStringUUID(int[] bits)

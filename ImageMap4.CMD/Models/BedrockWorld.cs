@@ -44,6 +44,11 @@ public class BedrockWorld : World
 
     public override void AddStructures(IEnumerable<StructureGrid> structures, IInventory inventory)
     {
+        inventory.AddItems(WriteStructureItems(structures));
+    }
+
+    public override List<NbtCompound> WriteStructureItems(IEnumerable<StructureGrid> structures)
+    {
         var db = OpenDB();
         using var batch = new WriteBatch();
         var items = new List<NbtCompound>();
@@ -102,7 +107,7 @@ public class BedrockWorld : World
             items.Add(item);
         }
         db.Write(batch);
-        inventory.AddItems(items);
+        return items;
     }
 
     public override void AddChest(IEnumerable<long> ids, IInventory inventory)
@@ -111,27 +116,46 @@ public class BedrockWorld : World
         {
             return;
         }
-        var items = new List<NbtCompound>();
-        var idlist = ids.ToList();
-        if (idlist.Count == 1 || !SupportsChests)
+        AddMapsToInventory(ids, inventory, InventoryMode.Chests);
+    }
+
+    public override NbtCompound MakeMapLeaf(long id) => Version.CreateMapItem(id);
+
+    // Chest slots hold 27 items; when there are more we nest chests inside chests so the
+    // entire import can live in a single inventory slot (impossible to do by hand in game).
+    private const int MaxChestDepth = 8;
+
+    public override List<NbtCompound> PackInventoryItems(List<NbtCompound> leaves, InventoryMode mode)
+    {
+        if (Version == null || mode == InventoryMode.Items || !SupportsChests || leaves.Count <= 1)
+            return leaves;
+        var items = leaves;
+        int depth = 0;
+        while (items.Count > 1 && depth < MaxChestDepth)
         {
-            items.AddRange(idlist.Select(x => Version.CreateMapItem(x)));
-        }
-        else
-        {
-            var chunks = idlist.Chunk(27);
-            foreach (var chunk in chunks)
+            var next = new List<NbtCompound>();
+            foreach (var chunk in items.Chunk(27))
             {
-                var maps = idlist.Select(x => Version.CreateMapItem(x)).ToArray();
-                for (int i = 0; i < maps.Length; i++)
+                var child = chunk.ToArray();
+                for (int i = 0; i < child.Length; i++)
                 {
-                    maps[i].Add(new NbtByte("Slot", (byte)i));
+                    child[i].Add(new NbtByte("Slot", (byte)i));
                 }
-                var chest = Version.CreateChestItem($"maps {chunk[0]} - {chunk[chunk.Length - 1]}", maps);
-                items.Add(chest);
+                next.Add(Version.CreateChestItem("maps", child));
             }
+            items = next;
+            depth++;
         }
-        inventory.AddItems(items);
+        return items;
+    }
+
+    public override int SlotsNeeded(int itemCount, InventoryMode mode)
+    {
+        if (itemCount <= 0)
+            return 0;
+        if (mode == InventoryMode.Items || Version == null || !SupportsChests)
+            return itemCount;
+        return 1;
     }
 
     public override IEnumerable<IInventory> GetInventories()

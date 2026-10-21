@@ -27,7 +27,7 @@ Actions:
      --size <width>,<height>
      --scaling pixel|bicubic
      --fill uniform|stretch|crop
-     --algorithm good|euclidean|ciede2000|cie76|cmc
+     --algorithm good|euclidean|ciede2000|cie76|cmc|oklab
      --dithering none|floyd|burks
      --background <color>
      --id <id>

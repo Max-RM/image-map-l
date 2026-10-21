@@ -3,9 +3,19 @@ using TryashtarUtils.Nbt;
 
 namespace ImageMap4;
 
+// How imported items are placed into an inventory: one item per slot, or packed into
+// chests (recursively on Bedrock) so that many items can share a single slot.
+public enum InventoryMode
+{
+    Items = 0,
+    Chests = 1
+}
+
 public interface IInventory
 {
     string Name { get; }
+    // Number of usable empty slots, used to warn before an import would not fit.
+    int FreeSlots { get; }
     void AddItems(IEnumerable<NbtCompound> items);
 }
 
@@ -13,6 +23,7 @@ public interface IInventory
 public class NoInventory : IInventory
 {
     public string Name => "None";
+    public int FreeSlots => int.MaxValue;
     public void AddItems(IEnumerable<NbtCompound> items) { }
 }
 
@@ -26,6 +37,20 @@ public class JavaInventory : IInventory
         Name = name;
         File = file;
         Inventory = inventory;
+    }
+
+    public int FreeSlots
+    {
+        get
+        {
+            var occupied = Inventory.Cast<NbtCompound>()
+                .Select(x => x.Get<NbtByte>("Slot"))
+                .Where(x => x != null)
+                .Select(x => x!.Value)
+                .Distinct()
+                .Count();
+            return Math.Max(0, 36 - occupied);
+        }
     }
 
     public void AddItems(IEnumerable<NbtCompound> items)
@@ -59,6 +84,23 @@ public class BedrockInventory : IInventory
         Name = name;
         World = world;
         Key = key;
+    }
+
+    public int FreeSlots
+    {
+        get
+        {
+            var db = World.OpenDB();
+            var bytes = db.Get(Key);
+            if (bytes == null)
+                return 0;
+            var file = new NbtFile() { BigEndian = false };
+            file.LoadFromBuffer(bytes, 0, bytes.Length, NbtCompression.None);
+            var inventory = file.GetRootTag<NbtCompound>()?.Get<NbtList>("Inventory");
+            if (inventory == null)
+                return 0;
+            return inventory.Cast<NbtCompound>().Count(x => x.Get<NbtByte>("Count")?.Value == 0);
+        }
     }
 
     public void AddItems(IEnumerable<NbtCompound> items)

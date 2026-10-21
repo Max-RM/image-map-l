@@ -15,8 +15,8 @@ public partial class AddToInventoryWindow : Window
     {
         get
         {
-            if (Properties.Settings.Default.InventoryChoice >= Parent.PlayerList.Count || Properties.Settings.Default.InventoryChoice < 0)
-                Properties.Settings.Default.InventoryChoice = 1;
+            if (Properties.Settings.Default.InventoryChoice <= 0 || Properties.Settings.Default.InventoryChoice >= Parent.PlayerList.Count)
+                Properties.Settings.Default.InventoryChoice = Parent.PlayerList.Count > 1 ? 1 : 0;
             return Parent.PlayerList[Properties.Settings.Default.InventoryChoice];
         }
         set { Properties.Settings.Default.InventoryChoice = Parent.PlayerList.IndexOf(value); }

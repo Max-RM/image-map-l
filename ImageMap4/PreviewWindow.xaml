@@ -1,0 +1,44 @@
+﻿<Window x:Class="ImageMap4.PreviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ImageMap4"
+        mc:Ignorable="d"
+        Title="{Binding ID, StringFormat=map_{0}}"
+        Height="600"
+        Width="600"
+        MinHeight="240"
+        MinWidth="240"
+        FontSize="16"
+        WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Shared.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <Grid Background="LightGray">
+        <Grid.RowDefinitions>
+            <RowDefinition />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Viewbox Grid.Row="0"
+                 Stretch="Uniform"
+                 Margin="10">
+            <Grid Width="512"
+                  Height="512">
+                <Image Source="{StaticResource ItemFrame}"
+                       RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                <local:MapPreview DataContext="{Binding Data}" />
+            </Grid>
+        </Viewbox>
+        <Button Grid.Row="1"
+                Content="Close"
+                Padding="30,5"
+                Margin="0,10,0,10"
+                HorizontalAlignment="Center"
+                Click="Close_Click" />
+    </Grid>
+</Window>

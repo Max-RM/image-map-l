@@ -1,4 +1,5 @@
-﻿using SixLabors.ImageSharp;
+﻿using fNbt;
+using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Processing.Processors.Dithering;
@@ -30,6 +31,27 @@ public abstract class World
     public abstract void AddStructures(IEnumerable<StructureGrid> structures, IInventory inventory);
     public abstract void AddChest(IEnumerable<long> ids, IInventory inventory);
     public abstract IEnumerable<IInventory> GetInventories();
+
+    // A single map item with no slot assigned, ready to be packed into an inventory.
+    public abstract NbtCompound MakeMapLeaf(long id);
+    // Writes the structure data (files/LDB) and returns the corresponding inventory items.
+    public abstract List<NbtCompound> WriteStructureItems(IEnumerable<StructureGrid> structures);
+    // Arranges leaf items into the top-level items that go into inventory slots.
+    public abstract List<NbtCompound> PackInventoryItems(List<NbtCompound> leaves, InventoryMode mode);
+    // How many inventory slots a given number of leaf items would occupy in the given mode.
+    public abstract int SlotsNeeded(int itemCount, InventoryMode mode);
+
+    public List<NbtCompound> BuildInventoryItems(IEnumerable<long> mapIds, IEnumerable<StructureGrid> structures, InventoryMode mode)
+    {
+        var leaves = mapIds.Select(MakeMapLeaf).ToList();
+        leaves.AddRange(WriteStructureItems(structures));
+        return PackInventoryItems(leaves, mode);
+    }
+
+    public void AddMapsToInventory(IEnumerable<long> ids, IInventory inventory, InventoryMode mode)
+    {
+        inventory.AddItems(PackInventoryItems(ids.Select(MakeMapLeaf).ToList(), mode));
+    }
     protected abstract void ProcessImage(Image<Rgba32> image, ProcessSettings settings);
     protected abstract byte[] EncodeColors(Image<Rgba32> image);
     public MapData[,] MakeMaps(ImportSettings settings)

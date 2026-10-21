@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
+using fNbt;
 using TryashtarUtils.Utility;
 
 namespace ImageMap4;
@@ -80,6 +81,29 @@ public class MainViewModel : ObservableObject
         set { Properties.Settings.Default.ShowEmptyMaps = value; OnPropertyChanged(); ExistingMapsView.Refresh(); }
     }
 
+    public bool CreateStructures
+    {
+        get { return Properties.Settings.Default.CreateStructures; }
+        set { Properties.Settings.Default.CreateStructures = value; OnPropertyChanged(); }
+    }
+
+    // Put the imported maps into the inventory as map items (not only structure blocks).
+    public bool CreateMaps
+    {
+        get { return Properties.Settings.Default.CreateMaps; }
+        set { Properties.Settings.Default.CreateMaps = value; OnPropertyChanged(); }
+    }
+
+    // Set by the window; asked when an import would not fit in the free inventory slots.
+    public Func<int, int, InsufficientSlotsAction>? ConfirmInsufficientSlots { get; set; }
+
+    private string? _transferStatus;
+    public string? TransferStatus
+    {
+        get { return _transferStatus; }
+        set { _transferStatus = value; OnPropertyChanged(); }
+    }
+
     public MainViewModel()
     {
         ExistingMapsView.Filter = x => ShowEmptyMaps || !((Selectable<Map>)x).Item.Data.IsEmpty;
@@ -89,28 +113,14 @@ public class MainViewModel : ObservableObject
         ExistingMaps.CollectionChanged += Maps_CollectionChanged;
         TransferAllCommand = new RelayCommand(() =>
         {
-            if (SelectedWorld == null)
-                return;
-            var overwritten = ExistingMaps.Where(x => ConflictingIDs.Contains(x.Item.ID)).ToList();
-            var importing = ImportingMaps.ToList();
-            UndoHistory.Perform(() =>
+            try
             {
-                SelectedWorld.AddMaps(importing.Select(x => x.Item));
-                InsertRange(importing, ExistingMaps, Sorter);
-                RemoveRange(overwritten, ExistingMaps);
-                foreach (var map in ExistingMaps)
-                {
-                    map.IsSelected = importing.Contains(map);
-                }
-                ImportingMaps.Clear();
-            }, () =>
+                TransferAll();
+            }
+            catch (Exception ex)
             {
-                SelectedWorld.RemoveMaps(importing.Select(x => x.Item.ID));
-                SelectedWorld.AddMaps(overwritten.Select(x => x.Item));
-                RemoveRange(importing, ExistingMaps);
-                InsertRange(overwritten, ExistingMaps, Sorter);
-                InsertRange(importing, ImportingMaps, Sorter);
-            });
+                TransferStatus = $"Could not write: {ex.Message}";
+            }
         });
         UndoCommand = new RelayCommand(() => UndoHistory.Undo());
         RedoCommand = new RelayCommand(() => UndoHistory.Redo());
@@ -139,6 +149,89 @@ public class MainViewModel : ObservableObject
             });
         });
         RefreshWorlds();
+    }
+
+    private void TransferAll()
+    {
+        if (SelectedWorld == null)
+            return;
+        var overwritten = ExistingMaps.Where(x => ConflictingIDs.Contains(x.Item.ID)).ToList();
+        var importing = ImportingMaps.ToList();
+        var structures = CreateStructures ? ImportingStructures.ToList() : new List<StructureGrid>();
+        var inventory = GetTargetInventory();
+        int mapCount = CreateMaps ? importing.Count : 0;
+        int total = mapCount + structures.Count;
+        int free = inventory?.FreeSlots ?? 0;
+
+        bool skipInventory = false;
+        if (inventory != null && total > free)
+        {
+            // More items than slots, so they get packed into (nested) chests.
+            int needed = SelectedWorld.SlotsNeeded(total, InventoryMode.Chests);
+            if (needed > free)
+            {
+                var action = ConfirmInsufficientSlots?.Invoke(needed, free) ?? InsufficientSlotsAction.Pause;
+                if (action == InsufficientSlotsAction.Pause)
+                    return;
+                skipInventory = true;
+            }
+        }
+
+        // Writes the structure data even when the items themselves have nowhere to go.
+        var leaves = new List<NbtCompound>();
+        if (CreateMaps && inventory != null)
+            leaves.AddRange(importing.Select(x => SelectedWorld.MakeMapLeaf(x.Item.ID)));
+        if (structures.Count > 0)
+            leaves.AddRange(SelectedWorld.WriteStructureItems(structures));
+
+        if (inventory != null && !skipInventory && leaves.Count > 0)
+        {
+            var packed = leaves.Count > free
+                ? SelectedWorld.PackInventoryItems(leaves, InventoryMode.Chests)
+                : leaves;
+            inventory.AddItems(packed);
+            int added = Math.Min(packed.Count, free);
+            int after = inventory.FreeSlots;
+            TransferStatus = free <= 0
+                ? $"No free slots in {inventory.Name}; maps and structures were saved."
+                : after >= free
+                    ? $"Could not write to {inventory.Name}; close the world in Minecraft and try again. Maps and structures were saved."
+                    : added < packed.Count
+                        ? $"Added {added} of {packed.Count} item(s) to {inventory.Name}; not enough free slots. Maps and structures were saved."
+                        : $"Added {added} item(s) to {inventory.Name}.";
+        }
+        else if (skipInventory)
+        {
+            TransferStatus = "Maps and structures were saved; inventory was skipped.";
+        }
+        else if (inventory == null)
+        {
+            TransferStatus = "Maps and structures were saved; no inventory selected.";
+        }
+        else
+        {
+            TransferStatus = "Nothing to add to the inventory.";
+        }
+
+        ImportingStructures.Clear();
+        UndoHistory.Perform(() =>
+        {
+            SelectedWorld.AddMaps(importing.Select(x => x.Item));
+            InsertRange(importing, ExistingMaps, Sorter);
+            RemoveRange(overwritten, ExistingMaps);
+            foreach (var map in ExistingMaps)
+            {
+                map.IsSelected = importing.Contains(map);
+            }
+            ImportingMaps.Clear();
+        }, () =>
+        {
+            SelectedWorld.RemoveMaps(importing.Select(x => x.Item.ID));
+            SelectedWorld.AddMaps(overwritten.Select(x => x.Item));
+            RemoveRange(importing, ExistingMaps);
+            InsertRange(overwritten, ExistingMaps, Sorter);
+            InsertRange(importing, ImportingMaps, Sorter);
+        });
     }
 
     private void Maps_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -301,18 +394,9 @@ public class MainViewModel : ObservableObject
         Properties.Settings.Default.BedrockFolders ??= new();
         if (Properties.Settings.Default.BedrockFolders.Count == 0)
         {
-            var users_folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Minecraft Bedrock", "Users");
-            if (Directory.Exists(users_folder))
-            {
-                foreach (var item in Directory.EnumerateDirectories(users_folder))
-                {
-                    if (!String.Equals(Path.GetFileName(item), "shared", StringComparison.OrdinalIgnoreCase))
-                    {
-                        Properties.Settings.Default.BedrockFolders.Add(Path.Combine(item, "games", "com.mojang", "minecraftWorlds"));
-                        break;
-                    }
-                }
-            }
+            var fallback = WorldSavePathRegistry.GetDefaultBedrockPaths().FirstOrDefault();
+            if (fallback != null)
+                Properties.Settings.Default.BedrockFolders.Add(fallback.Path);
         }
         foreach (var raw_dir in Properties.Settings.Default.BedrockFolders)
         {
@@ -344,6 +428,17 @@ public class MainViewModel : ObservableObject
         }
     }
 
+    private IInventory? GetTargetInventory()
+    {
+        if (PlayerList == null || PlayerList.Count <= 1)
+            return null;
+        int index = Properties.Settings.Default.InventoryChoice;
+        if (index <= 0 || index >= PlayerList.Count)
+            index = 1;
+        var inventory = PlayerList[index];
+        return inventory is NoInventory ? null : inventory;
+    }
+
     private long NextFreeID()
     {
         return ImportingMaps.Concat(ExistingMaps).Select(x => x.Item.ID).Append(-1).Max() + 1;
@@ -353,6 +448,7 @@ public class MainViewModel : ObservableObject
     {
         if (SelectedWorld == null)
             return;
+        TransferStatus = null;
         long curent_id = NextFreeID();
         var settings_list = new List<(ImportSettings settings, long first_id)>();
         foreach (var item in settings)
@@ -422,4 +518,10 @@ public class MainViewModel : ObservableObject
             return (done_maps, done_structures);
         });
     }
+}
+
+public enum InsufficientSlotsAction
+{
+    Ignore,
+    Pause
 }
