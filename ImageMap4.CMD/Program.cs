@@ -9,6 +9,12 @@ using System.Text;
 using TryashtarUtils.Utility;
 
 Console.OutputEncoding = Encoding.UTF8;
+if (args.Length == 1 && args[0] == "--check-versions")
+{
+    var fallback = VersionManager.DetermineBedrockVersion(new fNbt.NbtCompound());
+    Console.WriteLine(fallback is BedrockVersion b ? $"ok {b.Name}" : "ok");
+    return;
+}
 // Log option (-l / --log)
 bool logEnabled = args.Contains("-l") || args.Contains("--log");
 long? firstCreatedId = null;

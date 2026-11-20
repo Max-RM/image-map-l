@@ -14,6 +14,8 @@ public abstract class World
     public abstract string Name { get; }
     public abstract string WorldIcon { get; }
     public abstract DateTime AccessDate { get; }
+    // lastOpenedWithVersion / Data.Version.Name, not the YAML template bucket (1.0, 1.6, 1.13).
+    public string VersionLabel { get; protected set; } = "";
     public World(string folder)
     {
         Folder = folder;
@@ -23,6 +25,8 @@ public abstract class World
     public abstract bool SupportsGlowFrames { get; }
     public abstract bool SupportsChests { get; }
     public abstract bool SupportsStructures { get; }
+
+    public virtual void Close() { }
 
     public abstract bool IsIdTaken(long id);
     public abstract IAsyncEnumerable<Map> GetMapsAsync();

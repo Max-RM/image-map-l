@@ -28,8 +28,8 @@ function Write-Fail {
     Write-Host $Message -ForegroundColor Red
 }
 
-# Keeps the console window open so the user can read the output.
-# Skipped when -NoPause is passed (useful for CI).
+# Keeps the console open after a failure so the error can be read.
+# Not used on success. Skipped when -NoPause is passed (CI).
 function Wait-ForExit {
     param([switch]$NoPause)
     if ($NoPause) { return }

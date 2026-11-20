@@ -1,0 +1,295 @@
+﻿using fNbt;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+
+namespace ImageMap4;
+
+public interface IJavaVersion
+{
+    ReadOnlyMemory<Color> GetPalette();
+    Image<Rgba32> Decode(byte[] colors);
+    byte[] EncodeColors(Image<Rgba32> image);
+    NbtCompound CreateMapCompound(MapData map);
+    NbtCompound MakeMapItem(long id);
+    bool SupportsChests { get; }
+    bool SupportsStructures { get; }
+    NbtCompound MakeChestItem(string name, NbtCompound[] items);
+    NbtCompound MakeStructureItem(StructureGrid structure);
+    bool StructuresNamespace { get; }
+    NbtCompound CreateStructureFile(StructureGrid structure);
+    string StructureFileLocation(string world_folder, string identifier);
+    string MapFileLocation(string world_folder, long id);
+    string PlayerDataLocation(string world_folder, string uuid);
+    string MapLastIdLocation(string world_folder);
+    int? DataVersion { get; }
+    bool SupportsGlowFrames { get; }
+    bool SupportsInvisibleFrames { get; }
+    bool SupportsPlayerData { get; }
+}
+
+public class JavaVersionBuilder
+{
+    public readonly List<Rgba32> BaseColors = new();
+    public byte[]? Multipliers;
+    public NbtTemplate? MapEntity;
+    public NbtTemplate? MapData;
+    public NbtTemplate? MapItem;
+    public NbtTemplate? StructureItem;
+    public NbtTemplate? ChestItem;
+    public bool StructuresNamespace = false;
+    public string? StructureFile;
+    public string? MapFile;
+    public string? LastId;
+    public string? PlayerData;
+    public string? Name;
+    public int? DataVersion;
+    public bool GlowFrames = false;
+    public bool InvisibleFrames = false;
+    private static Rgba32 ParseYamlColor(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            string.Equals(value, "transparent", StringComparison.OrdinalIgnoreCase))
+            return default;
+        return Color.TryParse(value, out var color) ? color : default;
+    }
+
+    public void Add(JavaUpdate update, int? data_version)
+    {
+        if (update.SetBaseColors != null)
+        {
+            this.BaseColors.Clear();
+            foreach (var color in update.SetBaseColors)
+                this.BaseColors.Add(ParseYamlColor(color));
+        }
+        if (update.AddBaseColors != null)
+        {
+            foreach (var color in update.AddBaseColors)
+                this.BaseColors.Add(ParseYamlColor(color));
+        }
+        this.Multipliers = update.Multipliers ?? this.Multipliers;
+        if (update.MapEntity != null)
+            this.MapEntity = new(update.MapEntity);
+        if (update.MapData != null)
+            this.MapData = new(update.MapData);
+        if (update.MapItem != null)
+            this.MapItem = new(update.MapItem);
+        if (update.StructureItem != null)
+            this.StructureItem = new(update.StructureItem);
+        if (update.ChestItem != null)
+            this.ChestItem = new(update.ChestItem);
+        if (update.MapFile != null)
+            this.MapFile = update.MapFile;
+        if (update.LastId != null)
+            this.LastId = update.LastId;
+        if (update.PlayerData != null)
+            this.PlayerData = update.PlayerData;
+        this.Name = update.Name ?? this.Name;
+        this.StructureFile = update.StructureFile ?? this.StructureFile;
+        this.StructuresNamespace |= update.StructuresNamespace ?? false;
+        this.GlowFrames |= update.GlowFrames ?? false;
+        this.InvisibleFrames |= update.InvisibleFrames ?? false;
+        if (data_version != null)
+            this.DataVersion = data_version;
+    }
+    public IJavaVersion Build()
+    {
+        var exc = new NullReferenceException();
+        return new JavaVersion(Name ?? throw exc, GetPalette())
+        {
+            MapMaker = MapItem ?? throw exc,
+            FrameMaker = MapEntity,
+            DataMaker = MapData ?? throw exc,
+            StructureMaker = StructureItem,
+            ChestMaker = ChestItem,
+            StructureFile = StructureFile,
+            StructuresNamespace = StructuresNamespace,
+            DataVersion = DataVersion,
+            MapFile = MapFile ?? throw exc,
+            LastId = LastId ?? throw exc,
+            PlayerData = PlayerData,
+            SupportsGlowFrames = GlowFrames,
+            SupportsInvisibleFrames = InvisibleFrames
+        };
+    }
+
+    private IEnumerable<Color> GetPalette()
+    {
+        foreach (var color in BaseColors)
+        {
+            var alts = GetAlternateColors(color);
+            foreach (var alt in alts)
+            {
+                yield return alt;
+            }
+        }
+    }
+
+    private IEnumerable<Rgba32> GetAlternateColors(Rgba32 color)
+    {
+        return Multipliers.Select(x => Multiply(color, x));
+    }
+
+    private static Rgba32 Multiply(Rgba32 color, byte value)
+    {
+        return new Rgba32((byte)(color.R * value / 255), (byte)(color.G * value / 255), (byte)(color.B * value / 255), color.A);
+    }
+}
+
+public class JavaVersion : IJavaVersion
+{
+    private readonly Color[] Palette;
+    private readonly Dictionary<byte, Rgba32> ColorMap = new();
+    private readonly Dictionary<Color, byte> ReverseColorMap = new();
+    public NbtTemplate MapMaker { get; init; }
+    public NbtTemplate? StructureMaker { get; init; }
+    public NbtTemplate? ChestMaker { get; init; }
+    public NbtTemplate? FrameMaker { get; init; }
+    public NbtTemplate DataMaker { get; init; }
+    public string? StructureFile { get; init; }
+    public string MapFile { get; init; }
+    public string LastId { get; init; }
+    public string? PlayerData { get; init; }
+    public string Name { get; init; }
+    public bool StructuresNamespace { get; init; }
+    public int? DataVersion { get; init; }
+    public bool SupportsGlowFrames { get; init; }
+    public bool SupportsInvisibleFrames { get; init; }
+    public JavaVersion(string name, IEnumerable<Color> palette)
+    {
+        Name = name;
+        Palette = palette.ToArray();
+        for (byte i = 0; i < Palette.Length; i++)
+        {
+            ColorMap[i] = Palette[i];
+            if (!ReverseColorMap.ContainsKey(Palette[i]))
+                ReverseColorMap[Palette[i]] = i;
+        }
+    }
+
+    public ReadOnlyMemory<Color> GetPalette() => Palette;
+
+    public Image<Rgba32> Decode(byte[] colors)
+    {
+        byte[] pixels = new byte[128 * 128 * 4];
+        for (int i = 0; i < colors.Length; i++)
+        {
+            if (ColorMap.TryGetValue(colors[i], out var color))
+            {
+                pixels[4 * i] = color.R;
+                pixels[4 * i + 1] = color.G;
+                pixels[4 * i + 2] = color.B;
+                pixels[4 * i + 3] = color.A;
+            }
+        }
+        return Image.LoadPixelData<Rgba32>(pixels, 128, 128);
+    }
+
+    public byte[] EncodeColors(Image<Rgba32> image)
+    {
+        byte[] result = new byte[image.Width * image.Height];
+        for (int y = 0; y < image.Height; y++)
+        {
+            for (int x = 0; x < image.Width; x++)
+            {
+                var b = image[x, y];
+                result[y * image.Height + x] = ReverseColorMap[b];
+            }
+        }
+        return result;
+    }
+
+    public NbtCompound CreateStructureFile(StructureGrid structure)
+    {
+        var mapids = structure.ToIDGrid();
+        var entities = new NbtList("entities");
+        for (int y = 0; y < structure.GridHeight; y++)
+        {
+            for (int x = 0; x < structure.GridWidth; x++)
+            {
+                long? val = mapids[x, y];
+                if (val.HasValue)
+                {
+                    var frame = FrameMaker.Create(
+                         ("id", () => new NbtString(structure.GlowingFrames ? "minecraft:glow_item_frame" : "minecraft:item_frame")),
+                         ("invisible", () => new NbtByte(structure.InvisibleFrames))
+                     );
+                    frame.Name = "nbt";
+                    var item = MakeMapItem(val.Value);
+                    item.Name = "Item";
+                    frame.Add(item);
+                    entities.Add(new NbtCompound()
+                    {
+                        frame,
+                        new NbtList("blockPos") { new NbtInt(0), new NbtInt(structure.GridHeight - y - 1), new NbtInt(x) },
+                        new NbtList("pos") { new NbtDouble(0), new NbtDouble(structure.GridHeight - y - 1 + 0.5), new NbtDouble(x + 0.5) }
+                    });
+                }
+            }
+        }
+        return new NbtCompound("") {
+            new NbtList("size") {
+                new NbtInt(1), new NbtInt(structure.GridHeight), new NbtInt(structure.GridWidth)
+            },
+            entities,
+            new NbtList("blocks") {
+                new NbtCompound() {
+                    new NbtList("pos") { new NbtInt(0), new NbtInt(0), new NbtInt(0) },
+                    new NbtInt("state", 0)
+                }
+            },
+            new NbtList("palette") {
+                new NbtCompound() {
+                    new NbtString("Name", "minecraft:air")
+                }
+            }
+        };
+    }
+
+    public NbtCompound CreateMapCompound(MapData map) => DataMaker.Create(("colors", () => new NbtByteArray(map.Colors)));
+    public NbtCompound MakeMapItem(long id) => MapMaker.Create(
+        ("s", () => new NbtShort((short)id)),
+        ("i", () => new NbtInt((int)id))
+    );
+    public bool SupportsChests => ChestMaker != null;
+    public NbtCompound MakeChestItem(string name, NbtCompound[] items) => ChestMaker.Create(
+        ("name", () => new NbtString(name)),
+        ("items", () => new NbtList(items))
+    );
+    public bool SupportsStructures => StructureMaker != null;
+    public NbtCompound MakeStructureItem(StructureGrid structure)
+    {
+        string identifier = structure.Identifier;
+        if (!StructuresNamespace)
+            identifier = identifier.Replace(':', '_');
+        return StructureMaker.Create(
+            ("id", () => new NbtString(identifier)),
+            ("x", () => new NbtInt(1)),
+            ("y", () => new NbtInt(structure.GridHeight)),
+            ("z", () => new NbtInt(structure.GridWidth))
+        );
+    }
+    public string StructureFileLocation(string world_folder, string identifier)
+    {
+        string flat = identifier.Replace(':', '_');
+        int colon = identifier.IndexOf(':');
+        string nspace = identifier[..colon];
+        string body = identifier[(colon + 1)..];
+        string path = StructureFile.Replace("@flat", flat).Replace("@namespace", nspace).Replace("@body", body);
+        return Path.Combine(world_folder, path);
+    }
+    public string MapFileLocation(string world_folder, long id)
+    {
+        string path = MapFile.Replace("@id", id.ToString());
+        return Path.Combine(world_folder, path);
+    }
+    public string PlayerDataLocation(string world_folder, string uuid)
+    {
+        string path = PlayerData.Replace("@uuid", uuid);
+        return Path.Combine(world_folder, path);
+    }
+    public string MapLastIdLocation(string world_folder)
+    {
+        return Path.Combine(world_folder, LastId);
+    }
+    public bool SupportsPlayerData => PlayerData != null;
+}

@@ -123,7 +123,7 @@
                                                    Foreground="Gray"
                                                    FontSize="13"
                                                    Margin="4,0,0,0" />
-                                        <TextBlock Text="{Binding Version.Name, StringFormat={}{0}}"
+                                        <TextBlock Text="{Binding VersionLabel}"
                                                    Foreground="Gray"
                                                    FontSize="13"
                                                    Margin="4,0,0,0" />
@@ -327,9 +327,11 @@
                                       Margin="0,0,15,0"
                                       ToolTip="Add the imported maps to your inventory as map items. If they do not fit, they are packed into chests automatically." />
                             <CheckBox Content="Create structures"
-                                      IsChecked="{Binding CreateStructures}"
+                                      IsChecked="{Binding CreateStructuresEffective}"
+                                      IsEnabled="{Binding StructuresAvailable}"
                                       FontSize="16"
-                                      VerticalContentAlignment="Center" />
+                                      VerticalContentAlignment="Center"
+                                      ToolTip="Save a structure block that places the maps in item frames. Requires Bedrock 1.13+ (structuretemplate_ in LevelDB) or Java 1.10+." />
                         </StackPanel>
                         <TextBlock Margin="0,0,0,5">
                             <TextBlock.Style>

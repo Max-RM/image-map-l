@@ -34,6 +34,7 @@ public class VersionManager
             bedrock.Add(update);
             BedrockVersions.Add((update.Check, bedrock.Build()));
         }
+        VerifyBedrockVersionChecks();
     }
 
     public static IJavaVersion? DetermineJavaVersion(NbtCompound leveldat)
@@ -43,7 +44,60 @@ public class VersionManager
 
     public static IBedrockVersion? DetermineBedrockVersion(NbtCompound leveldat)
     {
-        return BedrockVersions.LastOrDefault(x => x.check.Passes(leveldat)).version;
+        var matched = BedrockVersions.LastOrDefault(x => x.check.Passes(leveldat)).version;
+        if (matched != null)
+            return matched;
+        // Older than the first YAML entry (PE 1.0) or missing version tags: numeric item IDs.
+        return BedrockVersions.Count > 0 ? BedrockVersions[0].version : null;
+    }
+
+    public static string FormatBedrockOpenedVersion(NbtCompound leveldat)
+    {
+        var list = leveldat.Get<NbtList>("lastOpenedWithVersion");
+        if (list != null && list.Count > 0)
+            return JoinVersionParts(list);
+        var parts = BedrockVersionCheck.ReadWorldVersion(leveldat);
+        if (parts == null || parts.Length == 0)
+            return "";
+        return string.Join(".", parts);
+    }
+
+    public static string FormatJavaOpenedVersion(NbtCompound? data)
+    {
+        var name = data?.Get<NbtCompound>("Version")?.Get<NbtString>("Name")?.Value;
+        return string.IsNullOrWhiteSpace(name) ? "" : name;
+    }
+
+    private static string JoinVersionParts(NbtList list)
+    {
+        var parts = new string[list.Count];
+        for (int i = 0; i < list.Count; i++)
+            parts[i] = list[i].IntValue.ToString();
+        return string.Join(".", parts);
+    }
+
+    private static void VerifyBedrockVersionChecks()
+    {
+        static NbtCompound Level(params int[] parts)
+        {
+            var list = new NbtList("lastOpenedWithVersion");
+            foreach (var n in parts)
+                list.Add(new NbtInt(n));
+            return new NbtCompound { list };
+        }
+        static string? NameOf(params int[] parts) => (DetermineBedrockVersion(Level(parts)) as BedrockVersion)?.Name;
+        if (NameOf(1, 0) != "1.0")
+            throw new InvalidOperationException("Bedrock 1.0 worlds must use numeric item IDs.");
+        if (NameOf(1, 6) != "1.6")
+            throw new InvalidOperationException("Bedrock 1.6 must match itself (string item IDs).");
+        if (DetermineBedrockVersion(Level(1, 13))?.SupportsStructures != true)
+            throw new InvalidOperationException("Bedrock 1.13 must support structuretemplate_ keys.");
+        if (DetermineBedrockVersion(Level(1, 12))?.SupportsStructures == true)
+            throw new InvalidOperationException("Bedrock 1.12 must not write structure templates.");
+        if (NameOf(1, 16) != "1.13")
+            throw new InvalidOperationException("Bedrock 1.16.0 is older than filled_map (1.16.100).");
+        if ((DetermineBedrockVersion(new NbtCompound()) as BedrockVersion)?.Name != "1.0")
+            throw new InvalidOperationException("Worlds without lastOpenedWithVersion must fall back to 1.0.");
     }
 }
 
@@ -188,17 +242,55 @@ public class BedrockVersionCheck
     public int[] Version;
     public bool Passes(NbtCompound leveldat)
     {
-        var versiontag = leveldat.Get<NbtList>("lastOpenedWithVersion");
-        if (versiontag != null)
+        var numbers = ReadWorldVersion(leveldat);
+        if (numbers == null)
+            return false;
+        return IsAtLeast(numbers, Version);
+    }
+
+    internal static int[]? ReadWorldVersion(NbtCompound leveldat)
+    {
+        foreach (var name in new[] { "lastOpenedWithVersion", "MinimumCompatibleClientVersion" })
         {
-            for (int i = 0; i < Math.Min(Version.Length, versiontag.Count); i++)
+            var list = leveldat.Get<NbtList>(name);
+            if (list != null && list.Count > 0)
             {
-                if (versiontag[i].IntValue == Version[i])
-                    continue;
-                return versiontag[i].IntValue > Version[i];
+                var parts = new int[list.Count];
+                for (int i = 0; i < list.Count; i++)
+                    parts[i] = list[i].IntValue;
+                return parts;
             }
         }
-        return false;
+        var inventory = leveldat.Get<NbtString>("InventoryVersion");
+        if (inventory != null)
+        {
+            var tokens = inventory.Value.Split('.');
+            var parts = new List<int>(tokens.Length);
+            foreach (var token in tokens)
+            {
+                if (int.TryParse(token, out int n))
+                    parts.Add(n);
+                else
+                    break;
+            }
+            if (parts.Count > 0)
+                return parts.ToArray();
+        }
+        return null;
+    }
+
+    // Missing components count as 0, so 1.16 < 1.16.100 and 1.0.0 == 1.0.
+    internal static bool IsAtLeast(int[] world, int[] minimum)
+    {
+        int n = Math.Max(world.Length, minimum.Length);
+        for (int i = 0; i < n; i++)
+        {
+            int w = i < world.Length ? world[i] : 0;
+            int m = i < minimum.Length ? minimum[i] : 0;
+            if (w != m)
+                return w > m;
+        }
+        return true;
     }
 }
 

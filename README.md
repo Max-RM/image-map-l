@@ -29,7 +29,7 @@ This repository is a fork of [tryashtar/image-map](https://github.com/tryashtar/
 
 Always back up a world before modifying it.
 
-The publish targets are `win-x64`, `win-x86`, `win-arm64`, and `linux-x64`. The Linux target contains the CLI only because the GUI uses WPF. Windows ARM32 is not currently supported.
+The build targets are `win-x64`, `win-x86`, `win-arm64`, and `linux-x64`. The Linux target contains the CLI only because the WPF GUI is Windows-only. Windows ARM32 (Surface RT / Windows 10 ARM) uses a separate .NET Framework WinForms tree in `ImageMap4.WinForms`.
 
 ## Using the GUI
 
@@ -190,18 +190,19 @@ cd image-map-l
 dotnet build ImageMap4.sln -c Release
 ```
 
-The repository includes PowerShell scripts for publishing:
+The repository includes PowerShell scripts for building:
 
 ```text
-scripts\Publish-All.ps1
-scripts\Publish-All.ps1 -Rids win-x64
-scripts\Publish-All.ps1 -SelfContained
+scripts\Build-All.ps1
+scripts\Build-All.ps1 -Rids win-x64
+scripts\Build-All.ps1 -SelfContained
+scripts\Build-win-arm32.ps1
 scripts\Package-All.ps1
 ```
 
-Framework-dependent builds are written to `Publish\ImageMap_<rid>`. Self-contained builds are written to `Publish\ImageMap_SelfContained_<rid>`. `Package-All.ps1` creates `Archives\ImageMap-<rid>.zip` and `Archives\ImageMap-SelfContained-<rid>.zip` for each published target. Pass `-SkipSelfContained` to package only the framework-dependent builds.
+Framework-dependent builds are written to `Publish\ImageMap_<rid>`. Self-contained builds are written to `Publish\ImageMap_SelfContained_<rid>`. `Package-All.ps1` creates `Archives\ImageMap-<rid>.zip` and `Archives\ImageMap-SelfContained-<rid>.zip` for each built target. Pass `-SkipSelfContained` to package only the framework-dependent builds.
 
-The GUI is published only for Windows targets. The `linux-x64` target publishes the CLI only.
+The WPF GUI is built only for Windows net6 targets. The `linux-x64` target builds the CLI only. `Build-All.ps1` also builds WinForms ARM32 into `Publish\ImageMap_win-arm32`. The same ARM32 output can be built alone with `scripts\Build-win-arm32.ps1`.
 
 ## Notes
 

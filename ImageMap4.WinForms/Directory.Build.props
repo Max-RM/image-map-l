@@ -1,0 +1,19 @@
+<Project>
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(MSBuildProjectName.StartsWith('ImageMap'))">
+    <Version>4.3.1</Version>
+    <AssemblyVersion>4.3.1.0</AssemblyVersion>
+    <FileVersion>4.3.1.0</FileVersion>
+    <InformationalVersion>4.3.1</InformationalVersion>
+    <Product>Image Map</Product>
+    <Authors>tryashtar</Authors>
+    <Copyright>Copyright © 2022 tryashtar</Copyright>
+    <Description>Converts images to maps for Minecraft</Description>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Platform)' == 'ARM'">
+    <PlatformTarget>ARM</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+</Project>

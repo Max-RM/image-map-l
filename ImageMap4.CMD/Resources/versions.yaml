@@ -42,7 +42,9 @@ bedrock:
       Items: '@items'
       display:
         Name: '@name'
-# structure blocks introduced, map locking added
+# structure blocks + LevelDB key structuretemplate_<namespace>:<name> added in 1.13.0
+# https://minecraft.wiki/w/Bedrock_Edition_1.13.0
+# https://minecraft.wiki/w/Bedrock_Edition_level_format/Other_data_format
 - name: "1.13"
   check:
     version: [1,13]

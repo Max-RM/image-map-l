@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("win-x64", "win-x86", "win-arm64", "linux-x64", "source")]
-    [string[]]$Items = @("win-x64", "win-x86", "win-arm64", "linux-x64"),
+    [ValidateSet("win-x64", "win-x86", "win-arm64", "win-arm32", "linux-x64", "source")]
+    [string[]]$Items = @("win-x64", "win-x86", "win-arm64", "win-arm32", "linux-x64"),
     [switch]$SkipSelfContained,
     [switch]$NoPause
 )
@@ -77,6 +77,7 @@ function New-SourceArchive {
         ".git", ".vs", ".idea",
         "Publish", "Archives",
         "bin", "obj",
+        "artifacts",
         "*.user", "*.suo"
     )
     Write-Host "  Packing source: $ProjectRoot -> $archivePath"
@@ -92,13 +93,13 @@ try {
         New-SourceArchive
     }
 
-    foreach ($rid in @("win-x64", "win-x86", "win-arm64", "linux-x64")) {
+    foreach ($rid in @("win-x64", "win-x86", "win-arm64", "win-arm32", "linux-x64")) {
         if ($Items -notcontains $rid) { continue }
 
         $srcDir = Join-Path $PublishRoot "ImageMap_$rid"
         New-Archive -SourceDir $srcDir -ArchiveName "ImageMap-$rid"
 
-        if (-not $SkipSelfContained) {
+        if (-not $SkipSelfContained -and $rid -ne "win-arm32") {
             $selfContainedDir = Join-Path $PublishRoot "ImageMap_SelfContained_$rid"
             New-Archive -SourceDir $selfContainedDir -ArchiveName "ImageMap-SelfContained-$rid"
         }

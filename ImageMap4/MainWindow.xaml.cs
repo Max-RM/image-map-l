@@ -191,6 +191,7 @@ public partial class MainWindow : Window, IDropTarget
 
     private void Window_Closing(object sender, CancelEventArgs e)
     {
+        ViewModel.SelectedWorld = null;
         Properties.Settings.Default.Save();
     }
 
@@ -354,6 +355,11 @@ public partial class MainWindow : Window, IDropTarget
         {
             ViewModel.SelectedWorld = null;
             return false;
+        }
+        if (MainViewModel.SameWorld(ViewModel.SelectedWorld, world))
+        {
+            TabList.SelectedItem = MapsTab;
+            return true;
         }
         try
         {

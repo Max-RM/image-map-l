@@ -25,6 +25,8 @@ public class Map : ObservableObject
         _id = id;
         _data = data;
     }
+
+    public void DisposeData() => _data.Dispose();
 }
 
 public class MapData
@@ -58,6 +60,13 @@ public class MapData
                 return false;
         }
         return true;
+    }
+
+    public void Dispose()
+    {
+        Image.Dispose();
+        if (!ReferenceEquals(Image, Original))
+            Original.Dispose();
     }
 }
 

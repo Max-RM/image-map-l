@@ -3,9 +3,9 @@ param(
     [switch]$NoPause
 )
 
-# Removes .NET compile caches (obj) and build outputs (bin), plus the local
-# Publish folder created by Publish-All.ps1. Archives are kept unless
-# -IncludeArchives is passed.
+# Removes compile caches (obj/bin, including ARM32 platform folders) and
+# the contents of Publish\ (the Publish folder itself is kept).
+# Archives are kept unless -IncludeArchives is passed.
 
 . (Join-Path $PSScriptRoot "_Common.ps1")
 
@@ -53,6 +53,35 @@ function Remove-Folder {
     }
 }
 
+function Clear-FolderContents {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+        Write-Host "$Label did not exist; created empty folder."
+        return
+    }
+
+    $items = @(Get-ChildItem -LiteralPath $Path -Force)
+    if ($items.Count -eq 0) {
+        Write-Host "$Label is already empty."
+        return
+    }
+
+    foreach ($item in $items) {
+        try {
+            Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop
+            Write-Host "  removed: $($item.FullName)"
+        }
+        catch {
+            Write-Warn "  could not remove: $($item.FullName)"
+        }
+    }
+}
+
 $failed = $false
 try {
     Write-Step "=== Cleaning build output ==="
@@ -63,12 +92,20 @@ try {
     Write-Host "Removing build outputs (bin)..."
     Remove-Directories -Root $ProjectRoot -Filter "bin" -Label "bin"
 
-    Write-Host "Removing publish output..."
-    Remove-Folder -Path (Join-Path $ProjectRoot "Publish") -Label "Publish"
+    Write-Host "Removing ARM32 artifacts..."
+    foreach ($armArtifacts in @(
+            (Join-Path $ProjectRoot "ImageMap4.WinForms\artifacts"),
+            (Join-Path $ProjectRoot "TEST\artifacts")
+        )) {
+        Remove-Folder -Path $armArtifacts -Label "ARM32 artifacts"
+    }
+
+    Write-Host "Clearing Publish contents (keeping the folder)..."
+    Clear-FolderContents -Path (Join-Path $ProjectRoot "Publish") -Label "Publish"
 
     if ($IncludeArchives) {
-        Write-Host "Removing archives..."
-        Remove-Folder -Path (Join-Path $ProjectRoot "Archives") -Label "Archives"
+        Write-Host "Clearing Archives contents (keeping the folder)..."
+        Clear-FolderContents -Path (Join-Path $ProjectRoot "Archives") -Label "Archives"
     }
     else {
         Write-Host "Archives kept (pass -IncludeArchives to remove them)."

@@ -23,9 +23,11 @@ public class JavaWorld : World
     public JavaWorld(string folder) : base(folder)
     {
         LevelDat = new NbtFile(Path.Combine(Folder, "level.dat"));
-        var version = VersionManager.DetermineJavaVersion(LevelDat.GetRootTag<NbtCompound>().Get<NbtCompound>("Data"));
-        Version = version;
-        Name = LevelDat.RootTag["Data"]?["LevelName"]?.StringValue ?? "";
+        var data = LevelDat.GetRootTag<NbtCompound>().Get<NbtCompound>("Data");
+        Version = VersionManager.DetermineJavaVersion(data);
+        Name = data?["LevelName"]?.StringValue ?? "";
+        var opened = VersionManager.FormatJavaOpenedVersion(data);
+        VersionLabel = !string.IsNullOrEmpty(opened) ? opened : (Version as JavaVersion)?.Name ?? "";
         WorldIcon = Path.Combine(Folder, "icon.png");
         AccessDate = File.GetLastWriteTime(LevelDat.FileName);
     }
@@ -43,6 +45,8 @@ public class JavaWorld : World
 
     public override List<NbtCompound> WriteStructureItems(IEnumerable<StructureGrid> structures)
     {
+        if (Version == null || !SupportsStructures)
+            return new List<NbtCompound>();
         var items = new List<NbtCompound>();
         foreach (var structure in structures)
         {
@@ -66,7 +70,12 @@ public class JavaWorld : World
         AddMapsToInventory(ids, inventory, InventoryMode.Chests);
     }
 
-    public override NbtCompound MakeMapLeaf(long id) => Version!.MakeMapItem(id);
+    public override NbtCompound MakeMapLeaf(long id)
+    {
+        if (Version == null)
+            throw new InvalidOperationException("Could not determine this world's version; cannot create map items.");
+        return Version.MakeMapItem(id);
+    }
 
     public override List<NbtCompound> PackInventoryItems(List<NbtCompound> leaves, InventoryMode mode)
     {

@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net472</TargetFramework>
+        <OutputType>Library</OutputType>
+        <LangVersion>latest</LangVersion>
+        <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+        <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    </PropertyGroup>
+    <PropertyGroup>
+        <_SharedLevelDb>$(MSBuildThisFileDirectory)..\..\..\level-db-wrapper\leveldb</_SharedLevelDb>
+        <_LevelDbDir Condition="Exists('$(_SharedLevelDb)\leveldb_mcpe_win_arm.dll')">$(_SharedLevelDb)</_LevelDbDir>
+        <_LevelDbDir Condition="'$(_LevelDbDir)' == ''">$(ProjectDir)leveldb</_LevelDbDir>
+    </PropertyGroup>
+    <ItemGroup>
+        <Content Include="$(_LevelDbDir)\leveldb_mcpe_win_arm.dll">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>leveldb_mcpe_win_arm.dll</Link>
+        </Content>
+        <Content Include="$(_LevelDbDir)\leveldb_mcpe_win_arm64.dll">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>leveldb_mcpe_win_arm64.dll</Link>
+        </Content>
+        <Content Include="$(_LevelDbDir)\leveldb_mcpe_win_amd64.dll">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>leveldb_mcpe_win_amd64.dll</Link>
+        </Content>
+        <Content Include="$(_LevelDbDir)\leveldb_mcpe_win32.dll">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>leveldb_mcpe_win32.dll</Link>
+        </Content>
+        <Content Include="..\..\native\arm32\zlib.dll">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>zlib.dll</Link>
+        </Content>
+    </ItemGroup>
+</Project>

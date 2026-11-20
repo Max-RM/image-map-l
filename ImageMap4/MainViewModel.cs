@@ -35,43 +35,49 @@ public class MainViewModel : ObservableObject
     private readonly UndoHistory UndoHistory = new();
     private FileStream? _sessionLock;
     private World? _selectedWorld;
+    private Task? _refreshTask;
     public World? SelectedWorld
     {
         get => _selectedWorld;
         set
         {
-            _sessionLock?.Unlock(0, 1);
-            _sessionLock?.Close();
-            _sessionLock?.Dispose();
-            _sessionLock = null;
+            if (SameWorld(_selectedWorld, value))
+                return;
+            ReleaseWorld();
             _selectedWorld = value;
             UndoHistory.Clear();
             OnPropertyChanged();
-            MapCTS?.Cancel();
-            MapCTS?.Dispose();
-            MapCTS = null;
-            if (_selectedWorld != null)
+            OnPropertyChanged(nameof(StructuresAvailable));
+            OnPropertyChanged(nameof(CreateStructuresEffective));
+            if (_selectedWorld == null)
+                return;
+            if (_selectedWorld is JavaWorld java)
             {
-                if (_selectedWorld is JavaWorld java)
+                try
                 {
                     _sessionLock = new FileStream(Path.Combine(java.Folder, "session.lock"), FileMode.OpenOrCreate);
                     _sessionLock.Lock(0, 1);
                 }
-                MapCTS = new();
-                _ = RefreshMaps(MapCTS.Token);
-                var inventories = _selectedWorld.GetInventories();
-                if (_selectedWorld is JavaWorld)
+                catch
                 {
-                    inventories = inventories.Select(x => new DisplayJavaInventory(x));
+                    _sessionLock?.Dispose();
+                    _sessionLock = null;
                 }
-                var players = inventories.ToList();
-                players.Insert(0, new NoInventory());
-                PlayerList = players.AsReadOnly();
-                OnPropertyChanged(nameof(PlayerList));
             }
+            MapCTS = new();
+            var token = MapCTS.Token;
+            var world = _selectedWorld;
+            _refreshTask = LoadWorldAsync(world, token);
         }
     }
     private CancellationTokenSource? MapCTS;
+
+    public static bool SameWorld(World? a, World? b)
+    {
+        if (a == null || b == null)
+            return false;
+        return string.Equals(a.Folder, b.Folder, StringComparison.OrdinalIgnoreCase);
+    }
 
     public HashSet<long> ConflictingIDs { get; } = new();
 
@@ -84,7 +90,22 @@ public class MainViewModel : ObservableObject
     public bool CreateStructures
     {
         get { return Properties.Settings.Default.CreateStructures; }
-        set { Properties.Settings.Default.CreateStructures = value; OnPropertyChanged(); }
+        set { Properties.Settings.Default.CreateStructures = value; OnPropertyChanged(); OnPropertyChanged(nameof(CreateStructuresEffective)); }
+    }
+
+    public bool StructuresAvailable => SelectedWorld?.SupportsStructures == true;
+
+    public bool CreateStructuresEffective
+    {
+        get => StructuresAvailable && Properties.Settings.Default.CreateStructures;
+        set
+        {
+            if (!StructuresAvailable)
+                return;
+            Properties.Settings.Default.CreateStructures = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CreateStructures));
+        }
     }
 
     // Put the imported maps into the inventory as map items (not only structure blocks).
@@ -157,7 +178,7 @@ public class MainViewModel : ObservableObject
             return;
         var overwritten = ExistingMaps.Where(x => ConflictingIDs.Contains(x.Item.ID)).ToList();
         var importing = ImportingMaps.ToList();
-        var structures = CreateStructures ? ImportingStructures.ToList() : new List<StructureGrid>();
+        var structures = CreateStructuresEffective ? ImportingStructures.ToList() : new List<StructureGrid>();
         var inventory = GetTargetInventory();
         int mapCount = CreateMaps ? importing.Count : 0;
         int total = mapCount + structures.Count;
@@ -257,22 +278,80 @@ public class MainViewModel : ObservableObject
     }
 
     private static readonly IComparer<Selectable<Map>> Sorter = new LambdaComparer<Selectable<Map>, long>(x => x.Item.ID);
-    public async Task RefreshMaps(CancellationToken ct)
+
+    private async Task LoadWorldAsync(World world, CancellationToken ct)
     {
+        try
+        {
+            IEnumerable<IInventory> inventories = world.GetInventories();
+            if (world is JavaWorld)
+                inventories = inventories.Select(x => new DisplayJavaInventory(x));
+            var players = inventories.ToList();
+            players.Insert(0, new NoInventory());
+            Application.Current.Dispatcher.BeginInvoke(() =>
+            {
+                if (ct.IsCancellationRequested)
+                    return;
+                PlayerList = players.AsReadOnly();
+                OnPropertyChanged(nameof(PlayerList));
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+
+        try
+        {
+            await Parallel.ForEachAsync(world.GetMapsAsync(), new ParallelOptions() { CancellationToken = ct, MaxDegreeOfParallelism = 5 }, (item, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                var selectable = new Selectable<Map>(item);
+                Application.Current.Dispatcher.BeginInvoke(() =>
+                {
+                    if (!token.IsCancellationRequested)
+                        Insert(selectable, ExistingMaps, Sorter);
+                });
+                return ValueTask.CompletedTask;
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+    }
+
+    public void ReleaseWorld()
+    {
+        MapCTS?.Cancel();
+        try { _refreshTask?.Wait(2000); } catch { }
+        MapCTS?.Dispose();
+        MapCTS = null;
+        _refreshTask = null;
+        try { _sessionLock?.Unlock(0, 1); } catch { }
+        try { _sessionLock?.Close(); } catch { }
+        try { _sessionLock?.Dispose(); } catch { }
+        _sessionLock = null;
+        try { _selectedWorld?.Close(); } catch { }
+        foreach (var map in ImportingMaps.Concat(ExistingMaps))
+        {
+            try { map.Item.DisposeData(); } catch { }
+        }
         ImportingMaps.Clear();
         ExistingMaps.Clear();
-        if (SelectedWorld == null)
-            return;
-        await Parallel.ForEachAsync(SelectedWorld.GetMapsAsync(), new ParallelOptions() { CancellationToken = ct, MaxDegreeOfParallelism = 5 }, async (item, token) =>
-        {
-            token.ThrowIfCancellationRequested();
-            var selectable = new Selectable<Map>(item);
-            Application.Current.Dispatcher.Invoke(() =>
-            {
-                if (!token.IsCancellationRequested)
-                    Insert(selectable, ExistingMaps, Sorter);
-            });
-        });
+        ImportingStructures.Clear();
+        ConflictingIDs.Clear();
+        PlayerList = null;
+        TransferStatus = null;
+        OnPropertyChanged(nameof(PlayerList));
+        OnPropertyChanged(nameof(ConflictingIDs));
+        OnPropertyChanged(nameof(TransferStatus));
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
     }
 
     public void ChangeIDs(IList<Selectable<Map>> source, IEnumerable<Selectable<Map>> maps, long new_id)

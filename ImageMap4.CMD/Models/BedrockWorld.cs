@@ -31,8 +31,9 @@ public class BedrockWorld : World
         leveldat.Position = 8;
         var nbt = new NbtFile() { BigEndian = false };
         nbt.LoadFromStream(leveldat, NbtCompression.None);
-        var version = VersionManager.DetermineBedrockVersion(nbt.GetRootTag<NbtCompound>());
-        Version = version;
+        var root = nbt.GetRootTag<NbtCompound>();
+        Version = VersionManager.DetermineBedrockVersion(root);
+        VersionLabel = VersionManager.FormatBedrockOpenedVersion(root);
         AccessDate = File.GetLastWriteTime(leveldat.Name);
     }
 
@@ -49,6 +50,8 @@ public class BedrockWorld : World
 
     public override List<NbtCompound> WriteStructureItems(IEnumerable<StructureGrid> structures)
     {
+        if (Version == null || !SupportsStructures)
+            return new List<NbtCompound>();
         var db = OpenDB();
         using var batch = new WriteBatch();
         var items = new List<NbtCompound>();
@@ -119,7 +122,12 @@ public class BedrockWorld : World
         AddMapsToInventory(ids, inventory, InventoryMode.Chests);
     }
 
-    public override NbtCompound MakeMapLeaf(long id) => Version.CreateMapItem(id);
+    public override NbtCompound MakeMapLeaf(long id)
+    {
+        if (Version == null)
+            throw new InvalidOperationException("Could not determine this world's version; cannot create map items.");
+        return Version.CreateMapItem(id);
+    }
 
     // Chest slots hold 27 items; when there are more we nest chests inside chests so the
     // entire import can live in a single inventory slot (impossible to do by hand in game).
@@ -211,7 +219,9 @@ public class BedrockWorld : World
         foreach (var map in maps)
         {
             var nbt = new NbtFile { BigEndian = false };
-            var data = map.Data.FullData ?? Version.CreateMapCompound(map);
+            var data = map.Data.FullData ?? Version?.CreateMapCompound(map);
+            if (data == null)
+                throw new InvalidOperationException("Could not determine this world's version; cannot write maps.");
             data["mapId"] = new NbtLong(map.ID);
             data.Name = "";
             nbt.RootTag = data;
@@ -258,11 +268,14 @@ public class BedrockWorld : World
         }
     }
 
+    public override void Close() => CloseDB();
+
     public void CloseDB()
     {
         lock (DBLock)
         {
             DBAccess?.Dispose();
+            DBAccess = null;
         }
     }
 }
